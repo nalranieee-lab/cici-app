@@ -1,0 +1,16 @@
+{
+  "description": "CICI is a personal finance platform for young adults that helps manage cash flow, evaluate installment affordability, and predict financial risks.",
+  "robots": {
+    "index": false
+  },
+  "icons": {
+    "icon": "/.figma/make/favicon.png"
+  },
+  "openGraph": {
+    "image": "/.figma/make/social-image.png"
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
