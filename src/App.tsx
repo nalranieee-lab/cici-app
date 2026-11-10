@@ -1,4 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "./lib/supabase";
+import Auth from "./pages/Auth";
 
 type Page =
   | "dashboard"
@@ -303,6 +306,8 @@ function Logo() {
 }
 
 export default function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [page, setPage] = useState<Page>("dashboard");
   const [obligations, setObligations] = useState(initialObligations);
   const [paid, setPaid] = useState<Set<number>>(new Set());
@@ -313,10 +318,25 @@ export default function App() {
   const currentBalance = BASE_BALANCE - paidTotal;
   const markPaid = (id: number) => setPaid((previous) => new Set(previous).add(id));
   const navigate = (target: Page) => { setPage(target); setSidebarOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (authLoading) return <div className="auth-loading">Memuat...</div>;
+  if (!session) return <Auth />;
+
   return <div className="app-shell">
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-top"><Logo /><Button variant="ghost" icon="close" onClick={() => setSidebarOpen(false)}>Tutup</Button></div><nav>{navItems.map((item) => <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}><Icon name={item.icon} /><span>{item.label}</span>{page === item.id && <i />}</button>)}</nav><div className="sidebar-help"><div className="mini-mascot">C</div><strong>Butuh panduan?</strong><p>Pelajari cara membaca proyeksi arus kas.</p><Button variant="secondary">Pusat bantuan</Button></div><p className="sidebar-caption">CICI membantu perencanaan, bukan menyediakan pinjaman.</p></aside>
     {sidebarOpen && <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} />}
-    <div className="main-shell"><header><Button variant="ghost" icon="menu" onClick={() => setSidebarOpen(true)}>Menu</Button><div className="mobile-logo"><Logo /></div><div className="header-tagline">Kelola Cicilan. Jaga Cash Flow. Tetap Aman.</div><div className="header-actions"><button className="icon-button" aria-label="Notifikasi"><Icon name="bell" /><i /></button><div className="profile"><div className="avatar">NA</div><div><strong>Naya Anindita</strong><span>Mahasiswa</span></div><Icon name="chevron" size={16} /></div></div></header>
+    <div className="main-shell"><header><Button variant="ghost" icon="menu" onClick={() => setSidebarOpen(true)}>Menu</Button><div className="mobile-logo"><Logo /></div><div className="header-tagline">Kelola Cicilan. Jaga Cash Flow. Tetap Aman.</div><div className="header-actions"><button className="icon-button" aria-label="Notifikasi"><Icon name="bell" /><i /></button><div className="profile"><div className="avatar">NA</div><div><strong>Naya Anindita</strong><span>Mahasiswa</span></div><Icon name="chevron" size={16} /></div><Button variant="ghost" onClick={() => supabase.auth.signOut()}>Keluar</Button></div></header>
       <main>
         {page === "dashboard" && <Dashboard obligations={obligations} paid={paid} currentBalance={currentBalance} onNavigate={navigate} onPay={setPaymentItem} onPaid={markPaid} />}
         {page === "simulation" && <Simulation obligations={obligations} paid={paid} currentBalance={currentBalance} />}
