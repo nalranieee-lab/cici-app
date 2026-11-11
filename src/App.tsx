@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 import Auth from "./pages/Auth";
 import ObligationsLive from "./pages/Obligations";
+import Incomes from "./pages/Incomes";
 
 type Page =
   | "dashboard"
@@ -293,6 +294,7 @@ function SettingsPage({ onOnboarding }: { onOnboarding: () => void }) {
   return <>
     <PageHeading eyebrow="Preferensi akun" title="Pengaturan" description="Kelola profil, asumsi pemasukan, dan preferensi notifikasi." action={<Button variant="secondary" onClick={onOnboarding}>Ulangi onboarding</Button>} />
     <div className="settings-grid"><Card><div className="card-title"><div><h2>Profil finansial</h2><p>Informasi untuk personalisasi proyeksi</p></div></div><div className="profile-settings"><div className="avatar large">NA</div><div><strong>Naya Anindita</strong><span>Mahasiswa · Pemasukan tidak tetap</span><Button variant="ghost">Ubah profil</Button></div></div><div className="form-grid"><Field label="Pemasukan normal" value={income} onChange={setIncome} type="number" /><Field label="Estimasi pemasukan terendah" value={lower} onChange={setLower} type="number" /></div><Button icon="check" onClick={() => setSaved(true)}>{saved ? "Tersimpan" : "Simpan perubahan"}</Button></Card><Card><div className="card-title"><div><h2>Notifikasi risiko</h2><p>Pilih pengingat yang ingin diterima</p></div></div><div className="toggle-list">{["Pengingat 3 hari sebelum jatuh tempo", "Peringatan saldo diproyeksikan rendah", "Ringkasan keuangan mingguan", "Insight anggaran harian"].map((label, index) => <label key={label} className="toggle-row"><span>{label}</span><input type="checkbox" defaultChecked={index < 3} /><i /></label>)}</div><div className="privacy-note"><Icon name="alert" /><p>CICI tidak terhubung ke rekening bank atau skor kredit. Semua proyeksi bergantung pada data yang kamu masukkan.</p></div></Card></div>
+    <Incomes />
   </>;
 }
 
