@@ -4,6 +4,7 @@ import { supabase } from "./lib/supabase";
 import Auth from "./pages/Auth";
 import ObligationsLive from "./pages/Obligations";
 import Incomes from "./pages/Incomes";
+import { useDashboardSummary } from "./lib/useDashboardSummary";
 
 type Page =
   | "dashboard"
@@ -153,6 +154,11 @@ function PaymentModal({ obligation, onClose, onPaid, currentBalance }: { obligat
 }
 
 function Dashboard({ obligations, paid, currentBalance, onNavigate, onPay, onPaid }: { obligations: Obligation[]; paid: Set<number>; currentBalance: number; onNavigate: (page: Page) => void; onPay: (item: Obligation) => void; onPaid: (id: number) => void }) {
+  // Data asli dari Supabase (hanya untuk 3 kartu: Pemasukan, Total pengeluaran, Kewajiban cicilan).
+  const { summary, loading: summaryLoading, error: summaryError, reload: reloadSummary } = useDashboardSummary();
+  const hasRealData = !!summary && (summary.incomeCount > 0 || summary.unpaidCount > 0 || summary.paidCount > 0);
+  const realValue = (pick: (data: NonNullable<typeof summary>) => string) => (summaryLoading ? "Memuat..." : summary ? pick(summary) : "—");
+  // DEMO: variabel di bawah ini masih memakai data contoh (dipakai Saldo, Proyeksi, Risiko, grafik, Uang aman). Dikerjakan di bagian 2.
   const unpaid = obligations.filter((item) => !paid.has(item.id));
   const obligationsTotal = unpaid.reduce((sum, item) => sum + item.amount, 0);
   const expenses = fixedExpenses.reduce((sum, item) => sum + item.amount, 0);
@@ -162,11 +168,18 @@ function Dashboard({ obligations, paid, currentBalance, onNavigate, onPay, onPai
   return <>
     <PageHeading eyebrow="Ringkasan November 2026" title="Selamat pagi, Naya" description="Berikut kondisi keuangan dan kewajiban yang perlu kamu perhatikan hari ini." action={<Button icon="spark" onClick={() => onNavigate("simulation")}>Simulasikan Cicilan Baru</Button>} />
     <div className="demo-banner"><Icon name="alert" /><span><strong>Mode demo.</strong> Proyeksi dihitung dari data contoh dan akan berubah saat kewajiban diperbarui.</span></div>
+    {summaryError && <div className="alert danger compact" role="alert"><div><strong>Ringkasan belum bisa dimuat</strong><p>{summaryError}</p><Button variant="secondary" onClick={reloadSummary}>Coba lagi</Button></div></div>}
+    {!summaryLoading && !summaryError && !hasRealData && <div className="alert warning compact"><Icon name="alert" /><div><strong>Belum ada data bulan ini</strong><p>Tambahkan kewajiban di menu Kewajiban Saya dan pemasukan di Pengaturan agar ringkasan terisi.</p></div></div>}
     <div className="metrics-grid">
-      <MetricCard label="Saldo tersedia" value={formatRupiah(currentBalance)} icon="wallet" helper="Dana tercatat saat ini" />
-      <MetricCard label="Pemasukan bulan ini" value={formatRupiah(INCOME)} icon="chart" tone="green" helper="Terjadwal 25 November" />
-      <MetricCard label="Total pengeluaran" value={formatRupiah(expenses)} icon="receipt" tone="yellow" helper="Kebutuhan rutin bulan ini" />
-      <MetricCard label="Kewajiban cicilan" value={formatRupiah(obligationsTotal)} icon="calendar" tone="purple" helper={`${unpaid.length} pembayaran mendatang`} />
+      {/* DEMO: Saldo tersedia masih data contoh (bagian 2). */}
+      <MetricCard label="Saldo tersedia" value={formatRupiah(currentBalance)} icon="wallet" helper="Dana tercatat saat ini (demo)" />
+      {/* DATA ASLI: incomes bulan berjalan. */}
+      <MetricCard label="Pemasukan bulan ini" value={realValue((d) => formatRupiah(d.incomeTotal))} icon="chart" tone="green" helper={summary ? `${summary.incomeCount} pemasukan bulan ini` : "Dari data pemasukanmu"} />
+      {/* DATA ASLI: obligations is_paid=true, due_date bulan berjalan. */}
+      <MetricCard label="Total pengeluaran" value={realValue((d) => formatRupiah(d.paidTotal))} icon="receipt" tone="yellow" helper={summary ? `${summary.paidCount} kewajiban sudah dibayar` : "Kewajiban yang sudah dibayar"} />
+      {/* DATA ASLI: obligations is_paid=false, due_date bulan berjalan. */}
+      <MetricCard label="Kewajiban cicilan" value={realValue((d) => formatRupiah(d.unpaidTotal))} icon="calendar" tone="purple" helper={summary ? `${summary.unpaidCount} pembayaran mendatang` : "Kewajiban belum dibayar"} />
+      {/* DEMO: Proyeksi akhir bulan masih data contoh (bagian 2). */}
       <MetricCard label="Proyeksi akhir bulan" value={formatRupiah(ending)} icon="spark" tone="blue" helper="Skenario pemasukan normal" />
       <Card className="metric-card risk-card"><div className="risk-gauge"><span style={{ transform: "rotate(28deg)" }} /></div><div className="metric-copy"><span>Status risiko</span><strong>{ending < 500_000 ? "Perlu perhatian" : "Terkendali"}</strong><small>Cadangan akhir bulan terbatas</small></div></Card>
     </div>
