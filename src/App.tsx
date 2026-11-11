@@ -7,6 +7,8 @@ import Incomes from "./pages/Incomes";
 import { useDashboardSummary } from "./lib/useDashboardSummary";
 import { useProfile, initialsOf, type Profile } from "./lib/useProfile";
 import ProfileOnboarding from "./pages/ProfileOnboarding";
+import { useCashflowData } from "./lib/useCashflowData";
+import { computeCashflow, toDateString, type DailyPoint } from "./lib/cashflow";
 
 type Page =
   | "dashboard"
@@ -114,32 +116,27 @@ function MetricCard({ label, value, icon, tone = "blue", helper }: { label: stri
   return <Card className="metric-card"><div className={`metric-icon ${tone}`}><Icon name={icon} /></div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small>{helper}</small></div></Card>;
 }
 
-function CashFlowChart({ obligations, paid, extra = 0, extraDay = 18 }: { obligations: Obligation[]; paid: Set<number>; extra?: number; extraDay?: number }) {
-  const points = useMemo(() => {
-    let balance = BASE_BALANCE - [...paid].reduce((sum, id) => sum + (obligations.find((item) => item.id === id)?.amount || 0), 0);
-    const all = [
-      ...obligations.filter((item) => !paid.has(item.id)).map((item) => ({ day: item.dueDay, amount: -item.amount })),
-      ...fixedExpenses.map((item) => ({ day: item.day, amount: -item.amount })),
-      { day: 25, amount: INCOME },
-      ...(extra ? [{ day: extraDay, amount: -extra }] : []),
-    ];
-    return [1, 5, 10, 15, 20, 25, 30].map((day) => {
-      const delta = all.filter((item) => item.day <= day).reduce((sum, item) => sum + item.amount, 0);
-      return { day, value: balance + delta };
-    });
-  }, [obligations, paid, extra, extraDay]);
-  const max = 5_000_000;
-  const line = points.map((point, index) => `${8 + index * 15.3},${82 - Math.max(0, Math.min(1, point.value / max)) * 62}`).join(" ");
+function CashFlowChart({ points }: { points: DailyPoint[] }) {
+  const values = points.map((point) => point.balance);
+  const hi = Math.max(...values, 1);
+  const lo = Math.min(...values, 0);
+  const range = hi - lo || 1;
+  const x = (index: number) => (points.length > 1 ? 8 + (index / (points.length - 1)) * 91.8 : 54);
+  const y = (value: number) => 82 - ((value - lo) / range) * 62;
+  const line = points.map((point, index) => `${x(index)},${y(point.balance)}`).join(" ");
+  const labelIndexes = [...new Set(Array.from({ length: Math.min(7, points.length) }, (_, i) => Math.round((i * (points.length - 1)) / Math.max(1, Math.min(7, points.length) - 1))))];
+  const label = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short" });
   return <div className="chart-wrap">
-    <div className="chart-legend"><span><i className="dot blue-dot" />Saldo proyeksi</span><span><i className="dot yellow-dot" />Pemasukan 25 Nov</span></div>
-    <svg className="line-chart" viewBox="0 0 100 90" preserveAspectRatio="none" aria-label="Grafik proyeksi saldo November">
+    <div className="chart-legend"><span><i className="dot blue-dot" />Saldo proyeksi</span><span><i className="dot yellow-dot" />Hari ada pemasukan atau kewajiban</span></div>
+    <svg className="line-chart" viewBox="0 0 100 90" preserveAspectRatio="none" aria-label="Grafik proyeksi saldo harian bulan berjalan">
       <defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#1769E0" stopOpacity=".22" /><stop offset="1" stopColor="#1769E0" stopOpacity="0" /></linearGradient></defs>
-      {[20, 40, 60, 80].map((y) => <line key={y} x1="0" x2="100" y1={y} y2={y} className="grid-line" />)}
-      <polygon points={`8,82 ${line} 99.8,82`} fill="url(#area)" />
-      <polyline points={line} className="balance-line" />
-      {points.map((point, index) => <circle key={point.day} cx={8 + index * 15.3} cy={82 - Math.max(0, Math.min(1, point.value / max)) * 62} r="1.5" className="chart-point" />)}
+      {[20, 40, 60, 80].map((gridY) => <line key={gridY} x1="0" x2="100" y1={gridY} y2={gridY} className="grid-line" />)}
+      {lo < 0 && <line x1="0" x2="100" y1={y(0)} y2={y(0)} className="grid-line" strokeDasharray="2 2" />}
+      {points.length > 1 && <polygon points={`${x(0)},82 ${line} ${x(points.length - 1)},82`} fill="url(#area)" />}
+      {points.length > 1 && <polyline points={line} className="balance-line" />}
+      {points.map((point, index) => (point.hasEvent || points.length === 1) && <circle key={point.date} cx={x(index)} cy={y(point.balance)} r="1.5" className="chart-point" />)}
     </svg>
-    <div className="chart-labels">{points.map((point) => <span key={point.day}>{point.day} Nov</span>)}</div>
+    <div className="chart-labels">{labelIndexes.map((index) => <span key={points[index].date}>{label(points[index].date)}</span>)}</div>
   </div>;
 }
 
@@ -155,39 +152,75 @@ function PaymentModal({ obligation, onClose, onPaid, currentBalance }: { obligat
   </div></div>;
 }
 
-function Dashboard({ displayName, obligations, paid, currentBalance, onNavigate, onPay, onPaid }: { displayName: string; obligations: Obligation[]; paid: Set<number>; currentBalance: number; onNavigate: (page: Page) => void; onPay: (item: Obligation) => void; onPaid: (id: number) => void }) {
-  // Data asli dari Supabase (hanya untuk 3 kartu: Pemasukan, Total pengeluaran, Kewajiban cicilan).
+const signedRupiah = (value: number) => `${value < 0 ? "-" : ""}${formatRupiah(value)}`;
+const formatLongDate = (date: string) => new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+
+function BalanceCard({ profile, onSave }: { profile: Profile | null; onSave: (balance: number) => Promise<string | null> }) {
+  const filled = !!profile?.balance_updated_at;
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState("");
+  const startEdit = () => { setValue(filled ? String(profile?.balance ?? 0) : ""); setError(""); setSuccess(""); setEditing(true); };
+  const submit = async () => {
+    const amount = Number(value);
+    if (value.trim() === "" || Number.isNaN(amount)) { setError("Saldo wajib diisi dengan angka"); return; }
+    if (amount < 0) { setError("Saldo tidak boleh minus"); return; }
+    setSaving(true);
+    const message = await onSave(amount);
+    setSaving(false);
+    if (message) setError(message);
+    else { setEditing(false); setError(""); setSuccess("Saldo berhasil disimpan."); }
+  };
+  return <Card className="metric-card"><div className="metric-icon blue"><Icon name="wallet" /></div><div className="metric-copy"><span>Saldo tersedia</span><strong>{filled ? formatRupiah(profile?.balance ?? 0) : "Belum diisi"}</strong><small>{filled && profile?.balance_updated_at ? `Diperbarui ${formatLongDate(profile.balance_updated_at)}` : "Belum diisi"}</small>
+    {editing ? <div style={{ marginTop: 8 }}><Field label="Saldo (Rp)" value={value} onChange={(next) => { setValue(next); setError(""); }} type="number" min={0} error={error || undefined} /><div style={{ display: "flex", gap: 8, marginTop: 8 }}><Button onClick={submit} disabled={saving}>{saving ? "Menyimpan..." : "Simpan"}</Button><Button variant="secondary" onClick={() => setEditing(false)} disabled={saving}>Batal</Button></div></div>
+      : <div style={{ marginTop: 8 }}><Button variant="secondary" onClick={startEdit}>{filled ? "Ubah saldo" : "Isi saldo"}</Button>{success && <small role="status" style={{ display: "block", marginTop: 6 }}>{success}</small>}{error && <small role="alert" style={{ display: "block", marginTop: 6, color: "var(--red)" }}>{error}</small>}</div>}
+  </div></Card>;
+}
+
+function Dashboard({ displayName, profile, onSaveBalance, obligations, paid, onNavigate, onPay, onPaid }: { displayName: string; profile: Profile | null; onSaveBalance: (balance: number) => Promise<string | null>; obligations: Obligation[]; paid: Set<number>; onNavigate: (page: Page) => void; onPay: (item: Obligation) => void; onPaid: (id: number) => void }) {
+  // Data asli dari Supabase untuk kartu Pemasukan, Total pengeluaran, dan Kewajiban cicilan.
   const { summary, loading: summaryLoading, error: summaryError, reload: reloadSummary } = useDashboardSummary();
   const hasRealData = !!summary && (summary.incomeCount > 0 || summary.unpaidCount > 0 || summary.paidCount > 0);
   const realValue = (pick: (data: NonNullable<typeof summary>) => string) => (summaryLoading ? "Memuat..." : summary ? pick(summary) : "—");
-  // DEMO: variabel di bawah ini masih memakai data contoh (dipakai Saldo, Proyeksi, Risiko, grafik, Uang aman). Dikerjakan di bagian 2.
+  // Data asli untuk proyeksi: saldo dari profil + incomes/obligations lewat fungsi murni di src/lib/cashflow.ts.
+  const { data: cashData, loading: cashLoading, error: cashError, reload: reloadCash } = useCashflowData();
+  const hasBalance = !!profile?.balance_updated_at;
+  const cash = hasBalance && cashData ? computeCashflow({ balance: profile?.balance ?? 0, today: toDateString(new Date()), incomes: cashData.incomes, obligations: cashData.obligations }) : null;
+  const cashValue = (pick: (data: NonNullable<typeof cash>) => string) => (!hasBalance ? "—" : cashLoading ? "Memuat..." : cash ? pick(cash) : "—");
+  const [showCalc, setShowCalc] = useState(false);
+  // DEMO: dipakai hanya oleh "Pembayaran mendatang" dan "Radar risiko" di bawah.
   const unpaid = obligations.filter((item) => !paid.has(item.id));
-  const obligationsTotal = unpaid.reduce((sum, item) => sum + item.amount, 0);
-  const expenses = fixedExpenses.reduce((sum, item) => sum + item.amount, 0);
-  const ending = currentBalance + INCOME - obligationsTotal - expenses;
-  const reserveBeforeIncome = unpaid.filter((item) => item.dueDay < 25).reduce((sum, item) => sum + item.amount, 0) + fixedExpenses.filter((item) => item.day < 25).reduce((sum, item) => sum + item.amount, 0);
-  const safe = Math.max(0, Math.floor((currentBalance - reserveBeforeIncome) / 21 / 1000) * 1000);
+  const monthLabel = new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+  const riskTone = cash?.risk === "Berisiko" ? "red" : cash?.risk === "Waspada" ? "yellow" : "green";
+  const needleAngle = cash?.risk === "Berisiko" ? -30 : cash?.risk === "Waspada" ? -90 : -150;
   return <>
     <PageHeading eyebrow="Ringkasan November 2026" title={`Selamat pagi, ${displayName.split(" ")[0]}`} description="Berikut kondisi keuangan dan kewajiban yang perlu kamu perhatikan hari ini." action={<Button icon="spark" onClick={() => onNavigate("simulation")}>Simulasikan Cicilan Baru</Button>} />
     <div className="demo-banner"><Icon name="alert" /><span><strong>Mode demo.</strong> Proyeksi dihitung dari data contoh dan akan berubah saat kewajiban diperbarui.</span></div>
-    {summaryError && <div className="alert danger compact" role="alert"><div><strong>Ringkasan belum bisa dimuat</strong><p>{summaryError}</p><Button variant="secondary" onClick={reloadSummary}>Coba lagi</Button></div></div>}
+    {(summaryError || cashError) && <div className="alert danger compact" role="alert"><div><strong>Sebagian data belum bisa dimuat</strong><p>{summaryError || cashError}</p><Button variant="secondary" onClick={() => { reloadSummary(); reloadCash(); }}>Coba lagi</Button></div></div>}
+    {!hasBalance && <div className="alert warning compact"><Icon name="alert" /><div><strong>Isi saldo untuk melihat proyeksi</strong><p>Proyeksi akhir bulan, status risiko, grafik, dan uang aman hari ini dihitung dari saldomu.</p></div></div>}
     {!summaryLoading && !summaryError && !hasRealData && <div className="alert warning compact"><Icon name="alert" /><div><strong>Belum ada data bulan ini</strong><p>Tambahkan kewajiban di menu Kewajiban Saya dan pemasukan di Pengaturan agar ringkasan terisi.</p></div></div>}
     <div className="metrics-grid">
-      {/* DEMO: Saldo tersedia masih data contoh (bagian 2). */}
-      <MetricCard label="Saldo tersedia" value={formatRupiah(currentBalance)} icon="wallet" helper="Dana tercatat saat ini (demo)" />
+      <BalanceCard profile={profile} onSave={onSaveBalance} />
       {/* DATA ASLI: incomes bulan berjalan. */}
       <MetricCard label="Pemasukan bulan ini" value={realValue((d) => formatRupiah(d.incomeTotal))} icon="chart" tone="green" helper={summary ? `${summary.incomeCount} pemasukan bulan ini` : "Dari data pemasukanmu"} />
       {/* DATA ASLI: obligations is_paid=true, due_date bulan berjalan. */}
       <MetricCard label="Total pengeluaran" value={realValue((d) => formatRupiah(d.paidTotal))} icon="receipt" tone="yellow" helper={summary ? `${summary.paidCount} kewajiban sudah dibayar` : "Kewajiban yang sudah dibayar"} />
       {/* DATA ASLI: obligations is_paid=false, due_date bulan berjalan. */}
       <MetricCard label="Kewajiban cicilan" value={realValue((d) => formatRupiah(d.unpaidTotal))} icon="calendar" tone="purple" helper={summary ? `${summary.unpaidCount} pembayaran mendatang` : "Kewajiban belum dibayar"} />
-      {/* DEMO: Proyeksi akhir bulan masih data contoh (bagian 2). */}
-      <MetricCard label="Proyeksi akhir bulan" value={formatRupiah(ending)} icon="spark" tone="blue" helper="Skenario pemasukan normal" />
-      <Card className="metric-card risk-card"><div className="risk-gauge"><span style={{ transform: "rotate(28deg)" }} /></div><div className="metric-copy"><span>Status risiko</span><strong>{ending < 500_000 ? "Perlu perhatian" : "Terkendali"}</strong><small>Cadangan akhir bulan terbatas</small></div></Card>
+      {/* DATA ASLI: saldo + pemasukan sisa - kewajiban sisa (src/lib/cashflow.ts). */}
+      <MetricCard label="Proyeksi akhir bulan" value={cashValue((c) => signedRupiah(c.projectedEnd))} icon="spark" tone="blue" helper={cash ? `Sampai ${formatLongDate(cash.endOfMonth)}` : "Sampai akhir bulan"} />
+      {/* DATA ASLI: status dari saldo harian terendah. */}
+      <Card className="metric-card risk-card"><div className="risk-gauge"><span style={{ transform: `rotate(${needleAngle}deg)` }} /></div><div className="metric-copy"><span>Status risiko</span><strong>{cashValue((c) => c.risk)}</strong><small>{cash ? `Saldo terendah ${signedRupiah(cash.lowest.balance)} pada ${formatLongDate(cash.lowest.date)}` : "Berdasarkan saldo harian terendah"}</small></div></Card>
     </div>
     <div className="dashboard-grid">
-      <Card className="chart-card"><div className="card-title"><div><h2>Proyeksi arus kas</h2><p>Pergerakan saldo berdasarkan transaksi terjadwal</p></div><Badge tone="blue">November 2026</Badge></div><CashFlowChart obligations={obligations} paid={paid} /></Card>
-      <Card className="safe-card"><div className="mascot" aria-label="Maskot CICI"><div className="mascot-ear left" /><div className="mascot-ear right" /><div className="mascot-face"><i /><i /><span /></div><div className="mascot-body">C</div></div><Badge tone="green">Anggaran aman</Badge><h2>Uang aman hari ini</h2><strong className="safe-value">{formatRupiah(safe)}</strong><p>Setelah menyisihkan {formatRupiah(reserveBeforeIncome)} untuk kebutuhan hingga pemasukan berikutnya.</p><Button variant="secondary" onClick={() => onNavigate("budget")}>Lihat perhitungan <Icon name="arrow" /></Button></Card>
+      <Card className="chart-card"><div className="card-title"><div><h2>Proyeksi arus kas</h2><p>Saldo harian dari hari ini sampai akhir bulan</p></div><Badge tone="blue">{monthLabel}</Badge></div>{!hasBalance ? <div className="empty-state"><Icon name="chart" /><p>Isi saldo untuk melihat proyeksi.</p></div> : cashLoading ? <div className="empty-state" role="status"><p>Memuat proyeksi...</p></div> : cash ? <CashFlowChart points={cash.daily} /> : <div className="empty-state"><p>Proyeksi belum bisa ditampilkan.</p></div>}</Card>
+      <Card className="safe-card"><div className="mascot" aria-label="Maskot CICI"><div className="mascot-ear left" /><div className="mascot-ear right" /><div className="mascot-face"><i /><i /><span /></div><div className="mascot-body">C</div></div><Badge tone={cash ? riskTone : "gray"}>{cash ? cash.risk : "Belum ada saldo"}</Badge><h2>Uang aman hari ini</h2><strong className="safe-value">{cashValue((c) => formatRupiah(c.safe.amount))}</strong>
+        {cash ? <p>Setelah menyisihkan {formatRupiah(cash.safe.needs)} untuk kebutuhan hingga pemasukan berikutnya.{cash.safe.insufficient && " Saldo belum cukup untuk kewajiban sebelum pemasukan berikutnya."}</p> : <p>Isi saldo untuk melihat proyeksi.</p>}
+        {cash && <Button variant="secondary" onClick={() => setShowCalc(!showCalc)}>{showCalc ? "Sembunyikan perhitungan" : "Lihat perhitungan"} <Icon name="arrow" /></Button>}
+        {cash && showCalc && <div className="calculation" style={{ marginTop: 12 }}><div><span>Saldo tersedia</span><strong>{formatRupiah(profile?.balance ?? 0)}</strong></div><div className="minus"><span>Kewajiban belum dibayar sebelum {cash.safe.hasNextIncome ? `pemasukan ${formatLongDate(cash.safe.boundaryDate)}` : `${formatLongDate(cash.safe.boundaryDate)} (akhir bulan + 1 hari)`}</span><strong>-{formatRupiah(cash.safe.needs)}</strong></div><div className="equals"><span>Dibagi {cash.safe.days} hari</span><strong>{formatRupiah(cash.safe.amount)}/hari</strong></div></div>}
+      </Card>
     </div>
     <div className="lower-grid">
       <Card><div className="card-title"><div><h2>Pembayaran mendatang</h2><p>Kewajiban terdekat yang belum dibayar</p></div><Button variant="ghost" onClick={() => onNavigate("obligations")}>Lihat semua</Button></div><div className="payment-list">{unpaid.slice(0, 4).map((item) => <div className="payment-row" key={item.id}><div className="date-block"><strong>{item.dueDay}</strong><span>Nov</span></div><div className="payment-info"><strong>{item.name}</strong><span>{item.provider} · {formatRupiah(item.amount)}</span></div><Badge tone={item.dueDay <= 8 ? "yellow" : "gray"}>{item.dueDay <= 8 ? "Segera" : "Mendatang"}</Badge><div className="row-actions"><Button variant="ghost" onClick={() => onPaid(item.id)}>Tandai dibayar</Button><Button variant="secondary" onClick={() => onPay(item)}>Pay Now</Button></div></div>)}</div></Card>
@@ -357,7 +390,7 @@ export default function App() {
   const [paymentItem, setPaymentItem] = useState<Obligation | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const { profile, loading: profileLoading, error: profileError, reload: reloadProfile, save: saveProfile } = useProfile(session?.user.id);
+  const { profile, loading: profileLoading, error: profileError, reload: reloadProfile, save: saveProfile, saveBalance } = useProfile(session?.user.id);
   const displayName = profile?.full_name?.trim() ?? "";
   const paidTotal = [...paid].reduce((sum, id) => sum + (obligations.find((item) => item.id === id)?.amount || 0), 0);
   const currentBalance = BASE_BALANCE - paidTotal;
@@ -386,7 +419,7 @@ export default function App() {
     {sidebarOpen && <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} />}
     <div className="main-shell"><header><Button variant="ghost" icon="menu" onClick={() => setSidebarOpen(true)}>Menu</Button><div className="mobile-logo"><Logo /></div><div className="header-tagline">Kelola Cicilan. Jaga Cash Flow. Tetap Aman.</div><div className="header-actions"><button className="icon-button" aria-label="Notifikasi"><Icon name="bell" /><i /></button><div className="profile"><div className="avatar">{initialsOf(displayName)}</div><div><strong>{displayName}</strong>{profile?.occupation && <span>{profile.occupation}</span>}</div><Icon name="chevron" size={16} /></div><Button variant="ghost" onClick={() => supabase.auth.signOut()}>Keluar</Button></div></header>
       <main>
-        {page === "dashboard" && <Dashboard displayName={displayName} obligations={obligations} paid={paid} currentBalance={currentBalance} onNavigate={navigate} onPay={setPaymentItem} onPaid={markPaid} />}
+        {page === "dashboard" && <Dashboard displayName={displayName} profile={profile} onSaveBalance={saveBalance} obligations={obligations} paid={paid} onNavigate={navigate} onPay={setPaymentItem} onPaid={markPaid} />}
         {page === "simulation" && <Simulation obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "calendar" && <CalendarPage obligations={obligations} paid={paid} currentBalance={currentBalance} onPay={setPaymentItem} onPaid={markPaid} />}
         {page === "obligations" && <ObligationsLive />}
