@@ -19,7 +19,7 @@ type FormErrors = Partial<Record<keyof FormState, string>>;
  * Pembayaran dengan paid_at SEBELUM waktu ini dianggap data lama (dibayar sebelum pelacakan saldo ada),
  * sehingga membatalkannya tidak mengembalikan saldo. Atur ke waktu rilis fitur ini sebelum merge/deploy.
  */
-const BALANCE_TRACKING_START = "2026-11-11T00:00:00Z";
+const BALANCE_TRACKING_START = "2026-11-11T06:00:00Z";
 
 const COLUMNS = "id, name, amount, due_date, is_paid, paid_at, note";
 const emptyForm: FormState = { name: "", amount: "", due_date: "", note: "" };
