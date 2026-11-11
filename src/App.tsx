@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 import Auth from "./pages/Auth";
+import ObligationsLive from "./pages/Obligations";
 
 type Page =
   | "dashboard"
@@ -341,7 +342,7 @@ export default function App() {
         {page === "dashboard" && <Dashboard obligations={obligations} paid={paid} currentBalance={currentBalance} onNavigate={navigate} onPay={setPaymentItem} onPaid={markPaid} />}
         {page === "simulation" && <Simulation obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "calendar" && <CalendarPage obligations={obligations} paid={paid} currentBalance={currentBalance} onPay={setPaymentItem} onPaid={markPaid} />}
-        {page === "obligations" && <ObligationsPage obligations={obligations} paid={paid} onAdd={(item) => setObligations([...obligations, item])} onDelete={(id) => setObligations(obligations.filter((item) => item.id !== id))} onPay={setPaymentItem} onPaid={markPaid} />}
+        {page === "obligations" && <ObligationsLive />}
         {page === "budget" && <BudgetPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "reports" && <ReportsPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "settings" && <SettingsPage onOnboarding={() => setShowOnboarding(true)} />}
