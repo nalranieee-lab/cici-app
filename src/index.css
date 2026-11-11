@@ -102,6 +102,10 @@ footer button { border: 0; background: transparent; color: var(--blue); }
 .metric-copy > span { font-size: 8px; color: var(--muted); margin-bottom: 5px; }
 .metric-copy strong { font-size: 14px; letter-spacing: -.02em; white-space: nowrap; }
 .metric-copy small { color: #929bad; font-size: 7px; margin-top: 5px; white-space: nowrap; }
+/* Kartu Saldo: teks pengingat/catatan boleh membungkus agar tidak terpotong; kartu lain tidak berubah. */
+.balance-card .metric-copy { flex: 1 1 0; min-width: 0; }
+.balance-card .metric-copy small { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.balance-card .metric-copy .button { max-width: 100%; }
 .risk-gauge { width: 38px; height: 20px; border-radius: 40px 40px 0 0; background: conic-gradient(from 270deg at 50% 100%, var(--green) 0 23%, var(--yellow) 23% 43%, var(--red) 43% 50%, transparent 50%); position: relative; flex: 0 0 auto; }
 .risk-gauge span { width: 16px; height: 2px; background: var(--navy); position: absolute; bottom: 0; left: 50%; transform-origin: left; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(260px, .7fr); gap: 17px; margin-bottom: 17px; }
