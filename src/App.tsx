@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 import Auth from "./pages/Auth";
@@ -37,6 +37,8 @@ const formatRupiah = (value: number) =>
 const DEMO_YEAR = 2026;
 const DEMO_MONTH = 10;
 const BASE_BALANCE = 3_400_000;
+/** Saldo yang terakhir diperbarui lebih dari sekian hari lalu memunculkan pengingat di kartu Saldo. */
+const STALE_BALANCE_DAYS = 7;
 const INCOME = 4_200_000;
 const LOWER_INCOME = 3_300_000;
 
@@ -157,12 +159,14 @@ const formatLongDate = (date: string) => new Date(`${date.slice(0, 10)}T12:00:00
 
 function BalanceCard({ profile, onSave }: { profile: Profile | null; onSave: (balance: number) => Promise<string | null> }) {
   const filled = !!profile?.balance_updated_at;
+  const ageDays = filled && profile?.balance_updated_at ? (Date.now() - new Date(profile.balance_updated_at).getTime()) / 86_400_000 : 0;
+  const stale = filled && ageDays > STALE_BALANCE_DAYS;
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState("");
-  const startEdit = () => { setValue(filled ? String(profile?.balance ?? 0) : ""); setError(""); setSuccess(""); setEditing(true); };
+  const startEdit = () => { setValue(filled && (profile?.balance ?? 0) >= 0 ? String(profile?.balance ?? 0) : ""); setError(""); setSuccess(""); setEditing(true); };
   const submit = async () => {
     const amount = Number(value);
     if (value.trim() === "" || Number.isNaN(amount)) { setError("Saldo wajib diisi dengan angka"); return; }
@@ -173,9 +177,9 @@ function BalanceCard({ profile, onSave }: { profile: Profile | null; onSave: (ba
     if (message) setError(message);
     else { setEditing(false); setError(""); setSuccess("Saldo berhasil disimpan."); }
   };
-  return <Card className="metric-card"><div className="metric-icon blue"><Icon name="wallet" /></div><div className="metric-copy"><span>Saldo tersedia</span><strong>{filled ? formatRupiah(profile?.balance ?? 0) : "Belum diisi"}</strong><small>{filled && profile?.balance_updated_at ? `Diperbarui ${formatLongDate(profile.balance_updated_at)}` : "Belum diisi"}</small>
+  return <Card className="metric-card"><div className="metric-icon blue"><Icon name="wallet" /></div><div className="metric-copy"><span>Saldo tersedia</span><strong>{filled ? signedRupiah(profile?.balance ?? 0) : "Belum diisi"}</strong><small>{filled && profile?.balance_updated_at ? `Diperbarui ${formatLongDate(profile.balance_updated_at)}` : "Belum diisi"}</small>
     {editing ? <div style={{ marginTop: 8 }}><Field label="Saldo (Rp)" value={value} onChange={(next) => { setValue(next); setError(""); }} type="number" min={0} error={error || undefined} /><div style={{ display: "flex", gap: 8, marginTop: 8 }}><Button onClick={submit} disabled={saving}>{saving ? "Menyimpan..." : "Simpan"}</Button><Button variant="secondary" onClick={() => setEditing(false)} disabled={saving}>Batal</Button></div></div>
-      : <div style={{ marginTop: 8 }}><Button variant="secondary" onClick={startEdit}>{filled ? "Ubah saldo" : "Isi saldo"}</Button>{success && <small role="status" style={{ display: "block", marginTop: 6 }}>{success}</small>}{error && <small role="alert" style={{ display: "block", marginTop: 6, color: "var(--red)" }}>{error}</small>}</div>}
+      : <div style={{ marginTop: 8 }}>{stale && <small role="status" style={{ display: "block", marginBottom: 6, color: "#775918" }}>Saldo terakhir diperbarui {Math.floor(ageDays)} hari lalu. Cocokkan dengan saldo rekeningmu.</small>}<Button variant="secondary" onClick={startEdit}>{filled ? "Ubah saldo" : "Isi saldo"}</Button>{success && <small role="status" style={{ display: "block", marginTop: 6 }}>{success}</small>}{error && <small role="alert" style={{ display: "block", marginTop: 6, color: "var(--red)" }}>{error}</small>}</div>}
   </div></Card>;
 }
 
@@ -219,7 +223,7 @@ function Dashboard({ displayName, profile, onSaveBalance, obligations, paid, onN
       <Card className="safe-card"><div className="mascot" aria-label="Maskot CICI"><div className="mascot-ear left" /><div className="mascot-ear right" /><div className="mascot-face"><i /><i /><span /></div><div className="mascot-body">C</div></div><Badge tone={cash ? riskTone : "gray"}>{cash ? cash.risk : "Belum ada saldo"}</Badge><h2>Uang aman hari ini</h2><strong className="safe-value">{cashValue((c) => formatRupiah(c.safe.amount))}</strong>
         {cash ? <p>Setelah menyisihkan {formatRupiah(cash.safe.needs)} untuk kebutuhan hingga pemasukan berikutnya.{cash.safe.insufficient && " Saldo belum cukup untuk kewajiban sebelum pemasukan berikutnya."}</p> : <p>Isi saldo untuk melihat proyeksi.</p>}
         {cash && <Button variant="secondary" onClick={() => setShowCalc(!showCalc)}>{showCalc ? "Sembunyikan perhitungan" : "Lihat perhitungan"} <Icon name="arrow" /></Button>}
-        {cash && showCalc && <div className="calculation" style={{ marginTop: 12 }}><div><span>Saldo tersedia</span><strong>{formatRupiah(profile?.balance ?? 0)}</strong></div><div className="minus"><span>Kewajiban belum dibayar sebelum {cash.safe.hasNextIncome ? `pemasukan ${formatLongDate(cash.safe.boundaryDate)}` : `${formatLongDate(cash.safe.boundaryDate)} (akhir bulan + 1 hari)`}</span><strong>-{formatRupiah(cash.safe.needs)}</strong></div><div className="equals"><span>Dibagi {cash.safe.days} hari</span><strong>{formatRupiah(cash.safe.amount)}/hari</strong></div></div>}
+        {cash && showCalc && <div className="calculation" style={{ marginTop: 12 }}><div><span>Saldo tersedia</span><strong>{signedRupiah(profile?.balance ?? 0)}</strong></div><div className="minus"><span>Kewajiban belum dibayar sebelum {cash.safe.hasNextIncome ? `pemasukan ${formatLongDate(cash.safe.boundaryDate)}` : `${formatLongDate(cash.safe.boundaryDate)} (akhir bulan + 1 hari)`}</span><strong>-{formatRupiah(cash.safe.needs)}</strong></div><div className="equals"><span>Dibagi {cash.safe.days} hari</span><strong>{formatRupiah(cash.safe.amount)}/hari</strong></div></div>}
       </Card>
     </div>
     <div className="lower-grid">
@@ -390,7 +394,7 @@ export default function App() {
   const [paymentItem, setPaymentItem] = useState<Obligation | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const { profile, loading: profileLoading, error: profileError, reload: reloadProfile, save: saveProfile, saveBalance } = useProfile(session?.user.id);
+  const { profile, loading: profileLoading, error: profileError, reload: reloadProfile, save: saveProfile, saveBalance, refresh: refreshProfile } = useProfile(session?.user.id);
   const displayName = profile?.full_name?.trim() ?? "";
   const paidTotal = [...paid].reduce((sum, id) => sum + (obligations.find((item) => item.id === id)?.amount || 0), 0);
   const currentBalance = BASE_BALANCE - paidTotal;
@@ -407,6 +411,13 @@ export default function App() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  // Saat Dashboard dibuka lagi, ambil profil terbaru (saldo bisa berubah dari Kewajiban Saya) tanpa layar loading.
+  const previousPage = useRef(page);
+  useEffect(() => {
+    if (page === "dashboard" && previousPage.current !== "dashboard") refreshProfile();
+    previousPage.current = page;
+  }, [page, refreshProfile]);
 
   if (authLoading) return <div className="auth-loading">Memuat...</div>;
   if (!session) return <Auth />;
