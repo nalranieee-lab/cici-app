@@ -4,6 +4,9 @@ import { supabase } from "./lib/supabase";
 import Auth from "./pages/Auth";
 import ObligationsLive from "./pages/Obligations";
 import Incomes from "./pages/Incomes";
+import { useDashboardSummary } from "./lib/useDashboardSummary";
+import { useProfile, initialsOf, type Profile } from "./lib/useProfile";
+import ProfileOnboarding from "./pages/ProfileOnboarding";
 
 type Page =
   | "dashboard"
@@ -152,7 +155,12 @@ function PaymentModal({ obligation, onClose, onPaid, currentBalance }: { obligat
   </div></div>;
 }
 
-function Dashboard({ obligations, paid, currentBalance, onNavigate, onPay, onPaid }: { obligations: Obligation[]; paid: Set<number>; currentBalance: number; onNavigate: (page: Page) => void; onPay: (item: Obligation) => void; onPaid: (id: number) => void }) {
+function Dashboard({ displayName, obligations, paid, currentBalance, onNavigate, onPay, onPaid }: { displayName: string; obligations: Obligation[]; paid: Set<number>; currentBalance: number; onNavigate: (page: Page) => void; onPay: (item: Obligation) => void; onPaid: (id: number) => void }) {
+  // Data asli dari Supabase (hanya untuk 3 kartu: Pemasukan, Total pengeluaran, Kewajiban cicilan).
+  const { summary, loading: summaryLoading, error: summaryError, reload: reloadSummary } = useDashboardSummary();
+  const hasRealData = !!summary && (summary.incomeCount > 0 || summary.unpaidCount > 0 || summary.paidCount > 0);
+  const realValue = (pick: (data: NonNullable<typeof summary>) => string) => (summaryLoading ? "Memuat..." : summary ? pick(summary) : "—");
+  // DEMO: variabel di bawah ini masih memakai data contoh (dipakai Saldo, Proyeksi, Risiko, grafik, Uang aman). Dikerjakan di bagian 2.
   const unpaid = obligations.filter((item) => !paid.has(item.id));
   const obligationsTotal = unpaid.reduce((sum, item) => sum + item.amount, 0);
   const expenses = fixedExpenses.reduce((sum, item) => sum + item.amount, 0);
@@ -160,13 +168,20 @@ function Dashboard({ obligations, paid, currentBalance, onNavigate, onPay, onPai
   const reserveBeforeIncome = unpaid.filter((item) => item.dueDay < 25).reduce((sum, item) => sum + item.amount, 0) + fixedExpenses.filter((item) => item.day < 25).reduce((sum, item) => sum + item.amount, 0);
   const safe = Math.max(0, Math.floor((currentBalance - reserveBeforeIncome) / 21 / 1000) * 1000);
   return <>
-    <PageHeading eyebrow="Ringkasan November 2026" title="Selamat pagi, Naya" description="Berikut kondisi keuangan dan kewajiban yang perlu kamu perhatikan hari ini." action={<Button icon="spark" onClick={() => onNavigate("simulation")}>Simulasikan Cicilan Baru</Button>} />
+    <PageHeading eyebrow="Ringkasan November 2026" title={`Selamat pagi, ${displayName.split(" ")[0]}`} description="Berikut kondisi keuangan dan kewajiban yang perlu kamu perhatikan hari ini." action={<Button icon="spark" onClick={() => onNavigate("simulation")}>Simulasikan Cicilan Baru</Button>} />
     <div className="demo-banner"><Icon name="alert" /><span><strong>Mode demo.</strong> Proyeksi dihitung dari data contoh dan akan berubah saat kewajiban diperbarui.</span></div>
+    {summaryError && <div className="alert danger compact" role="alert"><div><strong>Ringkasan belum bisa dimuat</strong><p>{summaryError}</p><Button variant="secondary" onClick={reloadSummary}>Coba lagi</Button></div></div>}
+    {!summaryLoading && !summaryError && !hasRealData && <div className="alert warning compact"><Icon name="alert" /><div><strong>Belum ada data bulan ini</strong><p>Tambahkan kewajiban di menu Kewajiban Saya dan pemasukan di Pengaturan agar ringkasan terisi.</p></div></div>}
     <div className="metrics-grid">
-      <MetricCard label="Saldo tersedia" value={formatRupiah(currentBalance)} icon="wallet" helper="Dana tercatat saat ini" />
-      <MetricCard label="Pemasukan bulan ini" value={formatRupiah(INCOME)} icon="chart" tone="green" helper="Terjadwal 25 November" />
-      <MetricCard label="Total pengeluaran" value={formatRupiah(expenses)} icon="receipt" tone="yellow" helper="Kebutuhan rutin bulan ini" />
-      <MetricCard label="Kewajiban cicilan" value={formatRupiah(obligationsTotal)} icon="calendar" tone="purple" helper={`${unpaid.length} pembayaran mendatang`} />
+      {/* DEMO: Saldo tersedia masih data contoh (bagian 2). */}
+      <MetricCard label="Saldo tersedia" value={formatRupiah(currentBalance)} icon="wallet" helper="Dana tercatat saat ini (demo)" />
+      {/* DATA ASLI: incomes bulan berjalan. */}
+      <MetricCard label="Pemasukan bulan ini" value={realValue((d) => formatRupiah(d.incomeTotal))} icon="chart" tone="green" helper={summary ? `${summary.incomeCount} pemasukan bulan ini` : "Dari data pemasukanmu"} />
+      {/* DATA ASLI: obligations is_paid=true, due_date bulan berjalan. */}
+      <MetricCard label="Total pengeluaran" value={realValue((d) => formatRupiah(d.paidTotal))} icon="receipt" tone="yellow" helper={summary ? `${summary.paidCount} kewajiban sudah dibayar` : "Kewajiban yang sudah dibayar"} />
+      {/* DATA ASLI: obligations is_paid=false, due_date bulan berjalan. */}
+      <MetricCard label="Kewajiban cicilan" value={realValue((d) => formatRupiah(d.unpaidTotal))} icon="calendar" tone="purple" helper={summary ? `${summary.unpaidCount} pembayaran mendatang` : "Kewajiban belum dibayar"} />
+      {/* DEMO: Proyeksi akhir bulan masih data contoh (bagian 2). */}
       <MetricCard label="Proyeksi akhir bulan" value={formatRupiah(ending)} icon="spark" tone="blue" helper="Skenario pemasukan normal" />
       <Card className="metric-card risk-card"><div className="risk-gauge"><span style={{ transform: "rotate(28deg)" }} /></div><div className="metric-copy"><span>Status risiko</span><strong>{ending < 500_000 ? "Perlu perhatian" : "Terkendali"}</strong><small>Cadangan akhir bulan terbatas</small></div></Card>
     </div>
@@ -287,13 +302,38 @@ function ReportsPage({ obligations, paid, currentBalance }: { obligations: Oblig
   </>;
 }
 
-function SettingsPage({ onOnboarding }: { onOnboarding: () => void }) {
+function ProfileCard({ profile, onSave }: { profile: Profile | null; onSave: (fullName: string, occupation: string) => Promise<string | null> }) {
+  const name = profile?.full_name ?? "";
+  const occupation = profile?.occupation ?? "";
+  const [editing, setEditing] = useState(false);
+  const [fullName, setFullName] = useState(name);
+  const [job, setJob] = useState(occupation);
+  const [nameError, setNameError] = useState("");
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const startEdit = () => { setFullName(name); setJob(occupation); setNameError(""); setMessage(null); setEditing(true); };
+  const submit = async () => {
+    if (!fullName.trim()) { setNameError("Nama lengkap wajib diisi"); return; }
+    setSaving(true);
+    const error = await onSave(fullName, job);
+    setSaving(false);
+    if (error) setMessage({ type: "error", text: error });
+    else { setMessage({ type: "success", text: "Profil berhasil disimpan." }); setEditing(false); }
+  };
+  return <>
+    <div className="profile-settings"><div className="avatar large">{initialsOf(name)}</div><div><strong>{name}</strong>{occupation && <span>{occupation}</span>}{!editing && <Button variant="ghost" onClick={startEdit}>Ubah profil</Button>}</div></div>
+    {editing && <div className="form-grid"><Field label="Nama lengkap" value={fullName} onChange={(value) => { setFullName(value); setNameError(""); }} error={nameError || undefined} /><Field label="Pekerjaan atau status" value={job} onChange={setJob} placeholder="Opsional" /><div style={{ display: "flex", gap: 8 }}><Button onClick={submit} disabled={saving}>{saving ? "Menyimpan..." : "Simpan profil"}</Button><Button variant="secondary" onClick={() => setEditing(false)} disabled={saving}>Batal</Button></div></div>}
+    {message && <div className={`alert ${message.type === "success" ? "warning" : "danger"} compact`} role={message.type === "error" ? "alert" : "status"}><div><p>{message.text}</p></div></div>}
+  </>;
+}
+
+function SettingsPage({ onOnboarding, profile, onSaveProfile }: { onOnboarding: () => void; profile: Profile | null; onSaveProfile: (fullName: string, occupation: string) => Promise<string | null> }) {
   const [income, setIncome] = useState(String(INCOME));
   const [lower, setLower] = useState(String(LOWER_INCOME));
   const [saved, setSaved] = useState(false);
   return <>
     <PageHeading eyebrow="Preferensi akun" title="Pengaturan" description="Kelola profil, asumsi pemasukan, dan preferensi notifikasi." action={<Button variant="secondary" onClick={onOnboarding}>Ulangi onboarding</Button>} />
-    <div className="settings-grid"><Card><div className="card-title"><div><h2>Profil finansial</h2><p>Informasi untuk personalisasi proyeksi</p></div></div><div className="profile-settings"><div className="avatar large">NA</div><div><strong>Naya Anindita</strong><span>Mahasiswa · Pemasukan tidak tetap</span><Button variant="ghost">Ubah profil</Button></div></div><div className="form-grid"><Field label="Pemasukan normal" value={income} onChange={setIncome} type="number" /><Field label="Estimasi pemasukan terendah" value={lower} onChange={setLower} type="number" /></div><Button icon="check" onClick={() => setSaved(true)}>{saved ? "Tersimpan" : "Simpan perubahan"}</Button></Card><Card><div className="card-title"><div><h2>Notifikasi risiko</h2><p>Pilih pengingat yang ingin diterima</p></div></div><div className="toggle-list">{["Pengingat 3 hari sebelum jatuh tempo", "Peringatan saldo diproyeksikan rendah", "Ringkasan keuangan mingguan", "Insight anggaran harian"].map((label, index) => <label key={label} className="toggle-row"><span>{label}</span><input type="checkbox" defaultChecked={index < 3} /><i /></label>)}</div><div className="privacy-note"><Icon name="alert" /><p>CICI tidak terhubung ke rekening bank atau skor kredit. Semua proyeksi bergantung pada data yang kamu masukkan.</p></div></Card></div>
+    <div className="settings-grid"><Card><div className="card-title"><div><h2>Profil finansial</h2><p>Informasi untuk personalisasi proyeksi</p></div></div><ProfileCard profile={profile} onSave={onSaveProfile} /><div className="form-grid"><Field label="Pemasukan normal" value={income} onChange={setIncome} type="number" /><Field label="Estimasi pemasukan terendah" value={lower} onChange={setLower} type="number" /></div><Button icon="check" onClick={() => setSaved(true)}>{saved ? "Tersimpan" : "Simpan perubahan"}</Button></Card><Card><div className="card-title"><div><h2>Notifikasi risiko</h2><p>Pilih pengingat yang ingin diterima</p></div></div><div className="toggle-list">{["Pengingat 3 hari sebelum jatuh tempo", "Peringatan saldo diproyeksikan rendah", "Ringkasan keuangan mingguan", "Insight anggaran harian"].map((label, index) => <label key={label} className="toggle-row"><span>{label}</span><input type="checkbox" defaultChecked={index < 3} /><i /></label>)}</div><div className="privacy-note"><Icon name="alert" /><p>CICI tidak terhubung ke rekening bank atau skor kredit. Semua proyeksi bergantung pada data yang kamu masukkan.</p></div></Card></div>
     <Incomes />
   </>;
 }
@@ -317,6 +357,8 @@ export default function App() {
   const [paymentItem, setPaymentItem] = useState<Obligation | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const { profile, loading: profileLoading, error: profileError, reload: reloadProfile, save: saveProfile } = useProfile(session?.user.id);
+  const displayName = profile?.full_name?.trim() ?? "";
   const paidTotal = [...paid].reduce((sum, id) => sum + (obligations.find((item) => item.id === id)?.amount || 0), 0);
   const currentBalance = BASE_BALANCE - paidTotal;
   const markPaid = (id: number) => setPaid((previous) => new Set(previous).add(id));
@@ -335,23 +377,26 @@ export default function App() {
 
   if (authLoading) return <div className="auth-loading">Memuat...</div>;
   if (!session) return <Auth />;
+  if (profileLoading) return <div className="auth-loading">Memuat profil...</div>;
+  if (profileError) return <div className="auth-loading" role="alert"><div style={{ textAlign: "center" }}><p>{profileError}</p><div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}><Button onClick={reloadProfile}>Coba lagi</Button><Button variant="secondary" onClick={() => supabase.auth.signOut()}>Keluar</Button></div></div></div>;
+  if (!displayName) return <ProfileOnboarding initial={profile} onSave={saveProfile} />;
 
   return <div className="app-shell">
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-top"><Logo /><Button variant="ghost" icon="close" onClick={() => setSidebarOpen(false)}>Tutup</Button></div><nav>{navItems.map((item) => <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}><Icon name={item.icon} /><span>{item.label}</span>{page === item.id && <i />}</button>)}</nav><div className="sidebar-help"><div className="mini-mascot">C</div><strong>Butuh panduan?</strong><p>Pelajari cara membaca proyeksi arus kas.</p><Button variant="secondary">Pusat bantuan</Button></div><p className="sidebar-caption">CICI membantu perencanaan, bukan menyediakan pinjaman.</p></aside>
     {sidebarOpen && <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} />}
-    <div className="main-shell"><header><Button variant="ghost" icon="menu" onClick={() => setSidebarOpen(true)}>Menu</Button><div className="mobile-logo"><Logo /></div><div className="header-tagline">Kelola Cicilan. Jaga Cash Flow. Tetap Aman.</div><div className="header-actions"><button className="icon-button" aria-label="Notifikasi"><Icon name="bell" /><i /></button><div className="profile"><div className="avatar">NA</div><div><strong>Naya Anindita</strong><span>Mahasiswa</span></div><Icon name="chevron" size={16} /></div><Button variant="ghost" onClick={() => supabase.auth.signOut()}>Keluar</Button></div></header>
+    <div className="main-shell"><header><Button variant="ghost" icon="menu" onClick={() => setSidebarOpen(true)}>Menu</Button><div className="mobile-logo"><Logo /></div><div className="header-tagline">Kelola Cicilan. Jaga Cash Flow. Tetap Aman.</div><div className="header-actions"><button className="icon-button" aria-label="Notifikasi"><Icon name="bell" /><i /></button><div className="profile"><div className="avatar">{initialsOf(displayName)}</div><div><strong>{displayName}</strong>{profile?.occupation && <span>{profile.occupation}</span>}</div><Icon name="chevron" size={16} /></div><Button variant="ghost" onClick={() => supabase.auth.signOut()}>Keluar</Button></div></header>
       <main>
-        {page === "dashboard" && <Dashboard obligations={obligations} paid={paid} currentBalance={currentBalance} onNavigate={navigate} onPay={setPaymentItem} onPaid={markPaid} />}
+        {page === "dashboard" && <Dashboard displayName={displayName} obligations={obligations} paid={paid} currentBalance={currentBalance} onNavigate={navigate} onPay={setPaymentItem} onPaid={markPaid} />}
         {page === "simulation" && <Simulation obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "calendar" && <CalendarPage obligations={obligations} paid={paid} currentBalance={currentBalance} onPay={setPaymentItem} onPaid={markPaid} />}
         {page === "obligations" && <ObligationsLive />}
         {page === "budget" && <BudgetPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "reports" && <ReportsPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
-        {page === "settings" && <SettingsPage onOnboarding={() => setShowOnboarding(true)} />}
+        {page === "settings" && <SettingsPage onOnboarding={() => setShowOnboarding(true)} profile={profile} onSaveProfile={saveProfile} />}
       </main><footer><span>© 2026 CICI · Prototype demonstrasi</span><button onClick={() => setShowOnboarding(true)}>Buka onboarding</button><span>Privasi · Ketentuan · Bantuan</span></footer>
     </div>
     <div className="mobile-nav">{navItems.slice(0, 5).map((item) => <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}><Icon name={item.icon} /><span>{item.label.split(" ")[0]}</span></button>)}</div>
     {paymentItem && <PaymentModal obligation={paymentItem} currentBalance={currentBalance} onClose={() => setPaymentItem(null)} onPaid={() => { markPaid(paymentItem.id); setPaymentItem(null); }} />}
-    {showOnboarding && <Onboarding onFinish={() => { setShowOnboarding(false); navigate("dashboard"); }} />}
+    {showOnboarding && <ProfileOnboarding initial={profile} onSave={saveProfile} onClose={() => setShowOnboarding(false)} onSaved={() => { setShowOnboarding(false); navigate("dashboard"); }} />}
   </div>;
 }
