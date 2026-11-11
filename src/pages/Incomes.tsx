@@ -22,13 +22,14 @@ const formatDate = (value: string | null) =>
         month: "short",
         year: "numeric",
       })
-    : "Tanggal belum diisi";
+    : "-";
 
 function validate(form: FormState): FormErrors {
   const errors: FormErrors = {};
   if (!form.name.trim()) errors.name = "Nama wajib diisi";
   if (form.amount.trim() === "" || Number.isNaN(Number(form.amount))) errors.amount = "Nominal wajib diisi";
   else if (Number(form.amount) < 0) errors.amount = "Nominal tidak boleh minus";
+  if (!form.expected_date) errors.expected_date = "Tanggal wajib diisi";
   return errors;
 }
 
@@ -105,7 +106,7 @@ export default function Incomes() {
     const payload = {
       name: form.name.trim(),
       amount: Number(form.amount),
-      expected_date: form.expected_date || null,
+      expected_date: form.expected_date,
     };
     // user_id default auth.uid() di database, jadi tidak dikirim saat insert.
     const { error } =
@@ -149,7 +150,7 @@ export default function Incomes() {
           <div className="card-title">
             <div>
               <h2>{editingId !== null ? "Ubah pemasukan" : "Pemasukan baru"}</h2>
-              <p>Nama dan nominal wajib diisi. Tanggal perkiraan boleh dikosongkan.</p>
+              <p>Nama, nominal, dan tanggal wajib diisi.</p>
             </div>
             <button type="button" className="button ghost" onClick={closeForm}>
               Tutup
@@ -170,6 +171,7 @@ export default function Incomes() {
               <label className="field">
                 <span>Tanggal perkiraan</span>
                 <input type="date" value={form.expected_date} onChange={(e) => setField("expected_date", e.target.value)} />
+                {errors.expected_date && <small>{errors.expected_date}</small>}
               </label>
             </div>
             <button type="submit" className="button primary" disabled={saving}>
