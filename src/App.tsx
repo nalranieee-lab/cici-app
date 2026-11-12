@@ -9,6 +9,9 @@ import { useProfile, initialsOf, type Profile } from "./lib/useProfile";
 import ProfileOnboarding from "./pages/ProfileOnboarding";
 import { useCashflowData } from "./lib/useCashflowData";
 import { computeCashflow, toDateString, type DailyPoint } from "./lib/cashflow";
+import { useUpcomingObligations, type UpcomingObligation } from "./lib/useUpcomingObligations";
+import { computeRadar, dueBadge, RADAR_WINDOW_DAYS } from "./lib/radar";
+import { payObligation } from "./lib/obligationPayments";
 
 type Page =
   | "dashboard"
@@ -154,6 +157,7 @@ function PaymentModal({ obligation, onClose, onPaid, currentBalance }: { obligat
   </div></div>;
 }
 
+const shortDate = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short" });
 const signedRupiah = (value: number) => `${value < 0 ? "-" : ""}${formatRupiah(value)}`;
 const formatLongDate = (date: string) => new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
@@ -183,7 +187,7 @@ function BalanceCard({ profile, onSave }: { profile: Profile | null; onSave: (ba
   </div></Card>;
 }
 
-function Dashboard({ displayName, profile, onSaveBalance, obligations, paid, onNavigate, onPay, onPaid }: { displayName: string; profile: Profile | null; onSaveBalance: (balance: number) => Promise<string | null>; obligations: Obligation[]; paid: Set<number>; onNavigate: (page: Page) => void; onPay: (item: Obligation) => void; onPaid: (id: number) => void }) {
+function Dashboard({ displayName, profile, onSaveBalance, onRefreshProfile, onNavigate }: { displayName: string; profile: Profile | null; onSaveBalance: (balance: number) => Promise<string | null>; onRefreshProfile: () => Promise<void>; onNavigate: (page: Page) => void }) {
   // Data asli dari Supabase untuk kartu Pemasukan, Total pengeluaran, dan Kewajiban cicilan.
   const { summary, loading: summaryLoading, error: summaryError, reload: reloadSummary } = useDashboardSummary();
   const hasRealData = !!summary && (summary.incomeCount > 0 || summary.unpaidCount > 0 || summary.paidCount > 0);
@@ -194,15 +198,29 @@ function Dashboard({ displayName, profile, onSaveBalance, obligations, paid, onN
   const cash = hasBalance && cashData ? computeCashflow({ balance: profile?.balance ?? 0, today: toDateString(new Date()), incomes: cashData.incomes, obligations: cashData.obligations }) : null;
   const cashValue = (pick: (data: NonNullable<typeof cash>) => string) => (!hasBalance ? "—" : cashLoading ? "Memuat..." : cash ? pick(cash) : "—");
   const [showCalc, setShowCalc] = useState(false);
-  // DEMO: dipakai hanya oleh "Pembayaran mendatang" dan "Radar risiko" di bawah.
-  const unpaid = obligations.filter((item) => !paid.has(item.id));
+  // Pembayaran mendatang dan Radar risiko: kewajiban belum dibayar milik user.
+  const { items: upcoming, loading: upcomingLoading, error: upcomingError, reload: reloadUpcoming } = useUpcomingObligations();
+  const todayString = toDateString(new Date());
+  const radar = upcomingError ? null : computeRadar({ today: todayString, obligations: upcoming, balance: hasBalance ? profile?.balance ?? 0 : null });
+  const [payingId, setPayingId] = useState<UpcomingObligation["id"] | null>(null);
+  const [payNotice, setPayNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const handlePay = async (item: UpcomingObligation) => {
+    setPayingId(item.id);
+    setPayNotice(null);
+    const result = await payObligation(item); // fungsi yang sama dengan halaman Kewajiban Saya
+    if (result.status === "failed") setPayNotice({ tone: "error", text: result.message });
+    else {
+      setPayNotice(result.status === "paid" ? { tone: "success", text: result.notice } : { tone: "error", text: result.message });
+      await Promise.all([reloadUpcoming(), reloadCash(), reloadSummary(), onRefreshProfile()]);
+    }
+    setPayingId(null);
+  };
   const monthLabel = new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
   const riskTone = cash?.risk === "Berisiko" ? "red" : cash?.risk === "Waspada" ? "yellow" : "green";
   const needleAngle = cash?.risk === "Berisiko" ? -30 : cash?.risk === "Waspada" ? -90 : -150;
   return <>
-    <PageHeading eyebrow="Ringkasan November 2026" title={`Selamat pagi, ${displayName.split(" ")[0]}`} description="Berikut kondisi keuangan dan kewajiban yang perlu kamu perhatikan hari ini." action={<Button icon="spark" onClick={() => onNavigate("simulation")}>Simulasikan Cicilan Baru</Button>} />
-    <div className="demo-banner"><Icon name="alert" /><span><strong>Mode demo.</strong> Proyeksi dihitung dari data contoh dan akan berubah saat kewajiban diperbarui.</span></div>
-    {(summaryError || cashError) && <div className="alert danger compact" role="alert"><div><strong>Sebagian data belum bisa dimuat</strong><p>{summaryError || cashError}</p><Button variant="secondary" onClick={() => { reloadSummary(); reloadCash(); }}>Coba lagi</Button></div></div>}
+    <PageHeading eyebrow={`Ringkasan ${monthLabel}`} title={`Selamat pagi, ${displayName.split(" ")[0]}`} description="Berikut kondisi keuangan dan kewajiban yang perlu kamu perhatikan hari ini." action={<Button icon="spark" onClick={() => onNavigate("simulation")}>Simulasikan Cicilan Baru</Button>} />
+    {(summaryError || cashError || upcomingError) && <div className="alert danger compact" role="alert"><div><strong>Sebagian data belum bisa dimuat</strong><p>{summaryError || cashError || upcomingError}</p><Button variant="secondary" onClick={() => { reloadSummary(); reloadCash(); reloadUpcoming(); }}>Coba lagi</Button></div></div>}
     {!hasBalance && <div className="alert warning compact"><Icon name="alert" /><div><strong>Isi saldo untuk melihat proyeksi</strong><p>Proyeksi akhir bulan, status risiko, grafik, dan uang aman hari ini dihitung dari saldomu.</p></div></div>}
     {!summaryLoading && !summaryError && !hasRealData && <div className="alert warning compact"><Icon name="alert" /><div><strong>Belum ada data bulan ini</strong><p>Tambahkan kewajiban di menu Kewajiban Saya dan pemasukan di Pengaturan agar ringkasan terisi.</p></div></div>}
     <div className="metrics-grid">
@@ -226,9 +244,29 @@ function Dashboard({ displayName, profile, onSaveBalance, obligations, paid, onN
         {cash && showCalc && <div className="calculation" style={{ marginTop: 12 }}><div><span>Saldo tersedia</span><strong>{signedRupiah(profile?.balance ?? 0)}</strong></div><div className="minus"><span>Kewajiban belum dibayar sebelum {cash.safe.hasNextIncome ? `pemasukan ${formatLongDate(cash.safe.boundaryDate)}` : `${formatLongDate(cash.safe.boundaryDate)} (akhir bulan + 1 hari)`}</span><strong>-{formatRupiah(cash.safe.needs)}</strong></div><div className="equals"><span>Dibagi {cash.safe.days} hari</span><strong>{formatRupiah(cash.safe.amount)}/hari</strong></div></div>}
       </Card>
     </div>
+    {payNotice && <div className={`alert ${payNotice.tone === "success" ? "success" : "danger"} compact`} role={payNotice.tone === "success" ? "status" : "alert"}><div><p>{payNotice.text}</p></div></div>}
     <div className="lower-grid">
-      <Card><div className="card-title"><div><h2>Pembayaran mendatang</h2><p>Kewajiban terdekat yang belum dibayar</p></div><Button variant="ghost" onClick={() => onNavigate("obligations")}>Lihat semua</Button></div><div className="payment-list">{unpaid.slice(0, 4).map((item) => <div className="payment-row" key={item.id}><div className="date-block"><strong>{item.dueDay}</strong><span>Nov</span></div><div className="payment-info"><strong>{item.name}</strong><span>{item.provider} · {formatRupiah(item.amount)}</span></div><Badge tone={item.dueDay <= 8 ? "yellow" : "gray"}>{item.dueDay <= 8 ? "Segera" : "Mendatang"}</Badge><div className="row-actions"><Button variant="ghost" onClick={() => onPaid(item.id)}>Tandai dibayar</Button><Button variant="secondary" onClick={() => onPay(item)}>Pay Now</Button></div></div>)}</div></Card>
-      <Card className="risk-panel"><div className="card-title"><div><h2>Radar risiko</h2><p>Deteksi benturan kewajiban</p></div><div className="pulse-dot" /></div><div className="alert warning"><Icon name="alert" /><div><strong>Kewajiban menumpuk 5–18 November</strong><p>{formatRupiah(unpaid.filter((item) => item.dueDay <= 18).reduce((sum, item) => sum + item.amount, 0))} jatuh tempo dalam 13 hari. Jaga pengeluaran fleksibel tetap rendah.</p></div></div><div className="collision-line">{unpaid.slice(0, 5).map((item) => <div key={item.id} className="collision-item"><i /><span>{item.dueDay} Nov</span><strong>{formatRupiah(item.amount)}</strong></div>)}</div><Button variant="secondary" onClick={() => onNavigate("calendar")}>Lihat di kalender <Icon name="arrow" /></Button></Card>
+      <Card><div className="card-title"><div><h2>Pembayaran mendatang</h2><p>Kewajiban terdekat yang belum dibayar</p></div><Button variant="ghost" onClick={() => onNavigate("obligations")}>Lihat semua</Button></div>
+        {upcomingLoading ? <div className="empty-state" role="status"><p>Memuat pembayaran mendatang...</p></div>
+          : upcomingError ? <div className="empty-state"><p>Pembayaran mendatang belum bisa dimuat.</p></div>
+          : upcoming.length === 0 ? <div className="empty-state"><Icon name="check" /><strong>Tidak ada kewajiban yang belum dibayar</strong><p>Semua beres, atau kamu belum menambahkannya di Kewajiban Saya.</p></div>
+          : <div className="payment-list">{upcoming.slice(0, 4).map((item) => {
+            const badge = dueBadge(item.dueDate, todayString);
+            const due = new Date(`${item.dueDate}T12:00:00`);
+            return <div className="payment-row" key={item.id}><div className="date-block"><strong>{due.getDate()}</strong><span>{due.toLocaleDateString("id-ID", { month: "short" })}</span></div><div className="payment-info"><strong>{item.name}</strong><span>{formatRupiah(item.amount)} · {formatLongDate(item.dueDate)}</span></div><Badge tone={badge.tone}>{badge.label}</Badge><div className="row-actions"><Button variant="secondary" disabled={payingId === item.id} onClick={() => handlePay(item)}>{payingId === item.id ? "Memproses..." : "Tandai dibayar"}</Button></div></div>;
+          })}</div>}
+      </Card>
+      <Card className="risk-panel"><div className="card-title"><div><h2>Radar risiko</h2><p>Kewajiban {RADAR_WINDOW_DAYS} hari ke depan</p></div><div className={`pulse-dot ${radar?.warn ? "" : "green"}`} /></div>
+        {upcomingLoading ? <div className="empty-state" role="status"><p>Memuat radar risiko...</p></div>
+          : upcomingError || !radar ? <div className="empty-state"><p>Radar risiko belum bisa dimuat.</p></div>
+          : <>
+            {radar.warn
+              ? <div className="alert warning"><Icon name="alert" /><div><strong>{formatRupiah(radar.total)} jatuh tempo dalam {RADAR_WINDOW_DAYS} hari</strong><p>{radar.count} kewajiban{radar.rangeStart && radar.rangeEnd ? `, ${shortDate(radar.rangeStart)}${radar.rangeStart !== radar.rangeEnd ? ` – ${shortDate(radar.rangeEnd)}` : ""}` : ""}. {radar.reasons.join("; ")}.</p></div></div>
+              : <div className="alert success"><Icon name="check" /><div><strong>Tidak ada penumpukan kewajiban dalam {RADAR_WINDOW_DAYS} hari ke depan</strong>{radar.count > 0 && <p>{formatRupiah(radar.total)} untuk {radar.count} kewajiban{radar.rangeStart && radar.rangeEnd ? `, ${shortDate(radar.rangeStart)}${radar.rangeStart !== radar.rangeEnd ? ` – ${shortDate(radar.rangeEnd)}` : ""}` : ""}.</p>}</div></div>}
+            {!hasBalance && <p style={{ marginTop: 10 }}>Isi saldo untuk analisis lebih akurat.</p>}
+            {radar.timeline.length > 0 && <div className="collision-line">{radar.timeline.map((item) => <div key={item.id} className="collision-item"><i /><span>{shortDate(item.dueDate)}</span><strong>{formatRupiah(item.amount)}</strong></div>)}</div>}
+          </>}
+        <Button variant="secondary" onClick={() => onNavigate("calendar")}>Lihat di kalender <Icon name="arrow" /></Button></Card>
     </div>
   </>;
 }
@@ -430,14 +468,14 @@ export default function App() {
     {sidebarOpen && <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} />}
     <div className="main-shell"><header><Button variant="ghost" icon="menu" onClick={() => setSidebarOpen(true)}>Menu</Button><div className="mobile-logo"><Logo /></div><div className="header-tagline">Kelola Cicilan. Jaga Cash Flow. Tetap Aman.</div><div className="header-actions"><button className="icon-button" aria-label="Notifikasi"><Icon name="bell" /><i /></button><div className="profile"><div className="avatar">{initialsOf(displayName)}</div><div><strong>{displayName}</strong>{profile?.occupation && <span>{profile.occupation}</span>}</div><Icon name="chevron" size={16} /></div><Button variant="ghost" onClick={() => supabase.auth.signOut()}>Keluar</Button></div></header>
       <main>
-        {page === "dashboard" && <Dashboard displayName={displayName} profile={profile} onSaveBalance={saveBalance} obligations={obligations} paid={paid} onNavigate={navigate} onPay={setPaymentItem} onPaid={markPaid} />}
+        {page === "dashboard" && <Dashboard displayName={displayName} profile={profile} onSaveBalance={saveBalance} onRefreshProfile={refreshProfile} onNavigate={navigate} />}
         {page === "simulation" && <Simulation obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "calendar" && <CalendarPage obligations={obligations} paid={paid} currentBalance={currentBalance} onPay={setPaymentItem} onPaid={markPaid} />}
         {page === "obligations" && <ObligationsLive />}
         {page === "budget" && <BudgetPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "reports" && <ReportsPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "settings" && <SettingsPage onOnboarding={() => setShowOnboarding(true)} profile={profile} onSaveProfile={saveProfile} />}
-      </main><footer><span>© 2026 CICI · Prototype demonstrasi</span><button onClick={() => setShowOnboarding(true)}>Buka onboarding</button><span>Privasi · Ketentuan · Bantuan</span></footer>
+      </main><footer><span>© 2026 CICI · Versi beta</span><button onClick={() => setShowOnboarding(true)}>Buka onboarding</button><span>Privasi · Ketentuan · Bantuan</span></footer>
     </div>
     <div className="mobile-nav">{navItems.slice(0, 5).map((item) => <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}><Icon name={item.icon} /><span>{item.label.split(" ")[0]}</span></button>)}</div>
     {paymentItem && <PaymentModal obligation={paymentItem} currentBalance={currentBalance} onClose={() => setPaymentItem(null)} onPaid={() => { markPaid(paymentItem.id); setPaymentItem(null); }} />}

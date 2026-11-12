@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { adjustBalance } from "../lib/useProfile";
+import { payObligation, rupiah } from "../lib/obligationPayments";
 
 type Obligation = {
   id: string | number;
@@ -24,7 +25,6 @@ const BALANCE_TRACKING_START = "2026-11-11T06:00:00Z";
 const COLUMNS = "id, name, amount, due_date, is_paid, paid_at, note";
 const emptyForm: FormState = { name: "", amount: "", due_date: "", note: "" };
 
-const rupiah = (value: number) => `${value < 0 ? "-" : ""}Rp${Math.abs(Math.round(value)).toLocaleString("id-ID")}`;
 const formatDate = (value: string | null) =>
   value
     ? new Date(value.length === 10 ? `${value}T12:00:00` : value).toLocaleDateString("id-ID", {
@@ -157,19 +157,14 @@ export default function Obligations() {
     setBusyId(item.id);
     setActionError("");
     setNotice("");
-    const paidAt = new Date().toISOString();
-    // Urutan: 1) catat pembayaran, 2) baru kurangi saldo. Jika langkah 1 gagal, saldo tidak disentuh.
-    const { error } = await supabase.from("obligations").update({ is_paid: true, paid_at: paidAt }).eq("id", item.id);
-    if (error) {
-      setActionError(`Gagal menandai dibayar: ${error.message}`);
-      setBusyId(null);
-      return;
+    const result = await payObligation(item); // logika bersama dengan Dashboard (src/lib/obligationPayments.ts)
+    if (result.status === "failed") {
+      setActionError(result.message);
+    } else {
+      setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, is_paid: true, paid_at: result.paidAt } : row)));
+      if (result.status === "paid") setNotice(result.notice);
+      else setActionError(result.message);
     }
-    setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, is_paid: true, paid_at: paidAt } : row)));
-    const result = await adjustBalance(-Number(item.amount));
-    if (result.status === "ok") setNotice(`Pembayaran dicatat. Saldo berkurang ${rupiah(item.amount)} menjadi ${rupiah(result.after)}.`);
-    else if (result.status === "skipped") setNotice("Pembayaran dicatat. Saldo belum pernah diisi, jadi saldo tidak diubah.");
-    else setActionError(`Pembayaran sudah tercatat, tetapi saldo belum berubah (${result.message}). Perbarui saldo lewat "Ubah saldo" di Dashboard.`);
     setBusyId(null);
   };
 

@@ -146,8 +146,10 @@ footer button { border: 0; background: transparent; color: var(--blue); }
 .alert p { margin: 0; font-size: 9px; line-height: 1.55; }
 .alert.warning { background: #fff8e5; color: #775918; border: 1px solid #f8e8ae; }
 .alert.danger { background: #fff0f1; color: #9f2431; border: 1px solid #ffd6da; }
+.alert.success { background: #e7f8f0; color: #17704a; border: 1px solid #bfe9d6; }
 .alert.compact { margin-top: 15px; }
 .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 5px rgba(238, 141, 35, .13); margin: 6px; }
+.pulse-dot.green { background: var(--green); box-shadow: 0 0 0 5px rgba(30, 159, 104, .13); }
 .collision-line { display: flex; position: relative; justify-content: space-between; margin: 22px 5px; }
 .collision-line::before { content: ""; height: 2px; background: #f0d79a; position: absolute; top: 5px; left: 7px; right: 7px; }
 .collision-item { text-align: center; position: relative; z-index: 1; }
