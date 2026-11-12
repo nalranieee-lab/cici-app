@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { adjustBalance } from "../lib/useProfile";
+import { payObligation, rupiah } from "../lib/obligationPayments";
 
 type Obligation = {
   id: string | number;
@@ -14,10 +16,15 @@ type Obligation = {
 type FormState = { name: string; amount: string; due_date: string; note: string };
 type FormErrors = Partial<Record<keyof FormState, string>>;
 
+/**
+ * Pembayaran dengan paid_at SEBELUM waktu ini dianggap data lama (dibayar sebelum pelacakan saldo ada),
+ * sehingga membatalkannya tidak mengembalikan saldo. Atur ke waktu rilis fitur ini sebelum merge/deploy.
+ */
+const BALANCE_TRACKING_START = "2026-11-11T06:00:00Z";
+
 const COLUMNS = "id, name, amount, due_date, is_paid, paid_at, note";
 const emptyForm: FormState = { name: "", amount: "", due_date: "", note: "" };
 
-const rupiah = (value: number) => `Rp${Math.round(value).toLocaleString("id-ID")}`;
 const formatDate = (value: string | null) =>
   value
     ? new Date(value.length === 10 ? `${value}T12:00:00` : value).toLocaleDateString("id-ID", {
@@ -41,6 +48,7 @@ export default function Obligations() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [notice, setNotice] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<Obligation["id"] | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -148,10 +156,41 @@ export default function Obligations() {
   const markPaid = async (item: Obligation) => {
     setBusyId(item.id);
     setActionError("");
-    const paidAt = new Date().toISOString();
-    const { error } = await supabase.from("obligations").update({ is_paid: true, paid_at: paidAt }).eq("id", item.id);
-    if (error) setActionError(`Gagal menandai dibayar: ${error.message}`);
-    else setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, is_paid: true, paid_at: paidAt } : row)));
+    setNotice("");
+    const result = await payObligation(item); // logika bersama dengan Dashboard (src/lib/obligationPayments.ts)
+    if (result.status === "failed") {
+      setActionError(result.message);
+    } else {
+      setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, is_paid: true, paid_at: result.paidAt } : row)));
+      if (result.status === "paid") setNotice(result.notice);
+      else setActionError(result.message);
+    }
+    setBusyId(null);
+  };
+
+  const cancelPayment = async (item: Obligation) => {
+    // Pembayaran lama (sebelum pelacakan saldo) tidak pernah mengurangi saldo, jadi tidak dikembalikan.
+    const refundable = !!item.paid_at && item.paid_at >= BALANCE_TRACKING_START;
+    const consequence = refundable ? `${rupiah(item.amount)} akan dikembalikan ke saldo.` : "Saldo tidak diubah karena pembayaran ini tercatat sebelum pelacakan saldo.";
+    if (!window.confirm(`Batalkan pembayaran "${item.name}"? Status kembali menjadi belum dibayar. ${consequence}`)) return;
+    setBusyId(item.id);
+    setActionError("");
+    setNotice("");
+    const { error } = await supabase.from("obligations").update({ is_paid: false, paid_at: null }).eq("id", item.id);
+    if (error) {
+      setActionError(`Gagal membatalkan pembayaran: ${error.message}`);
+      setBusyId(null);
+      return;
+    }
+    setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, is_paid: false, paid_at: null } : row)));
+    if (!refundable) {
+      setNotice("Pembayaran dibatalkan. Saldo tidak diubah karena pembayaran ini tercatat sebelum pelacakan saldo.");
+    } else {
+      const result = await adjustBalance(Number(item.amount));
+      if (result.status === "ok") setNotice(`Pembayaran dibatalkan. Saldo bertambah ${rupiah(item.amount)} menjadi ${rupiah(result.after)}.`);
+      else if (result.status === "skipped") setNotice("Pembayaran dibatalkan. Saldo belum pernah diisi, jadi saldo tidak diubah.");
+      else setActionError(`Pembayaran sudah dibatalkan, tetapi saldo belum berubah (${result.message}). Perbarui saldo lewat "Ubah saldo" di Dashboard.`);
+    }
     setBusyId(null);
   };
 
@@ -208,6 +247,14 @@ export default function Obligations() {
         </section>
       )}
 
+      {notice && (
+        <div className="alert warning compact" role="status">
+          <div>
+            <p>{notice}</p>
+          </div>
+        </div>
+      )}
+
       {actionError && (
         <div className="alert danger compact" role="alert">
           <div>
@@ -251,6 +298,11 @@ export default function Obligations() {
                   {!item.is_paid && (
                     <button type="button" className="button secondary" disabled={busyId === item.id} onClick={() => markPaid(item)}>
                       Tandai dibayar
+                    </button>
+                  )}
+                  {item.is_paid && (
+                    <button type="button" className="button secondary" disabled={busyId === item.id} onClick={() => cancelPayment(item)}>
+                      Batalkan pembayaran
                     </button>
                   )}
                   <button type="button" className="button ghost" disabled={busyId === item.id} onClick={() => openEdit(item)}>

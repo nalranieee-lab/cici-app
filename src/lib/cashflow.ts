@@ -35,7 +35,7 @@ const toMs = (date: string) => {
   return Date.UTC(y, m - 1, d);
 };
 const fromMs = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const addDays = (date: string, days: number) => fromMs(toMs(date) + days * DAY_MS);
+export const addDays = (date: string, days: number) => fromMs(toMs(date) + days * DAY_MS);
 const diffDays = (from: string, to: string) => Math.round((toMs(to) - toMs(from)) / DAY_MS);
 
 export const toDateString = (d: Date) =>

@@ -50,6 +50,13 @@ export function useProfile(userId: string | undefined) {
     load();
   }, [load]);
 
+  /** Ambil ulang profil tanpa menampilkan layar loading (mis. saat Dashboard dibuka lagi). Error diabaikan; data lama dipertahankan. */
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    const { data, error: queryError } = await supabase.from("profiles").select(COLUMNS).eq("id", userId).maybeSingle();
+    if (!queryError && data) setProfile(normalize(data as Record<string, unknown>));
+  }, [userId]);
+
   /** Mengembalikan pesan error, atau null jika berhasil. */
   const save = useCallback(
     async (fullName: string, occupation: string): Promise<string | null> => {
@@ -85,7 +92,7 @@ export function useProfile(userId: string | undefined) {
     [userId],
   );
 
-  return { profile, loading, error, reload: load, save, saveBalance };
+  return { profile, loading, error, reload: load, refresh, save, saveBalance };
 }
 
 export const initialsOf = (name: string) =>
@@ -95,3 +102,37 @@ export const initialsOf = (name: string) =>
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "?";
+
+export type BalanceAdjustment =
+  | { status: "ok"; before: number; after: number }
+  | { status: "skipped" } // saldo belum pernah diisi, jadi tidak ada patokan untuk diubah
+  | { status: "error"; message: string };
+
+/**
+ * Menambah (delta positif) atau mengurangi (delta negatif) saldo di profil user yang login.
+ * Saldo dibaca ulang dari database tepat sebelum ditulis, lalu balance_updated_at diisi waktu sekarang.
+ * Saldo boleh menjadi negatif. Tidak atomik: lihat catatan kasus yang tidak ditangani.
+ */
+export async function adjustBalance(delta: number): Promise<BalanceAdjustment> {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) return { status: "error", message: "Sesi login tidak ditemukan." };
+  const userId = userData.user.id;
+  const { data, error: readError } = await supabase
+    .from("profiles")
+    .select("balance, balance_updated_at")
+    .eq("id", userId)
+    .maybeSingle();
+  if (readError) return { status: "error", message: readError.message };
+  if (!data) return { status: "error", message: "baris profil tidak ditemukan." };
+  if (!data.balance_updated_at) return { status: "skipped" };
+  const before = Number(data.balance ?? 0);
+  const after = before + delta;
+  const { data: updated, error: updateError } = await supabase
+    .from("profiles")
+    .update({ balance: after, balance_updated_at: new Date().toISOString() })
+    .eq("id", userId)
+    .select("balance");
+  if (updateError) return { status: "error", message: updateError.message };
+  if (!updated || updated.length === 0) return { status: "error", message: "baris profil tidak boleh diubah." };
+  return { status: "ok", before, after };
+}
