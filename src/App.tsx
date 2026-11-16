@@ -12,9 +12,19 @@ import { computeCashflow, toDateString, type DailyPoint } from "./lib/cashflow";
 import { useUpcomingObligations, type UpcomingObligation } from "./lib/useUpcomingObligations";
 import { computeRadar, dueBadge, RADAR_WINDOW_DAYS } from "./lib/radar";
 import { payObligation } from "./lib/obligationPayments";
+import Wallet from "./pages/Wallet";
+import SimulationLive from "./pages/Simulation";
+import ReportsLive from "./pages/Reports";
+import { useFinancialData } from "./lib/useFinancialData";
+import { isoToday, monthDate, monthEnd } from "./lib/projection";
+import type { InstallmentPlan } from "./lib/financialTypes";
+import { createDemoPaymentState, simulatePayment, invalidatePayment, reconcilePayments, type DemoPaymentState } from "./lib/walletPayments";
+import type { FinancialObligation } from "./lib/financialTypes";
+import type { WalletId } from "./lib/walletDemo";
 
 type Page =
   | "dashboard"
+  | "wallet"
   | "simulation"
   | "calendar"
   | "obligations"
@@ -62,6 +72,7 @@ const fixedExpenses = [
 
 const navItems: { id: Page; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "grid" },
+  { id: "wallet", label: "E-wallet", icon: "wallet" },
   { id: "simulation", label: "Simulasi Cicilan", icon: "spark" },
   { id: "calendar", label: "Kalender Keuangan", icon: "calendar" },
   { id: "obligations", label: "Kewajiban Saya", icon: "receipt" },
@@ -271,41 +282,6 @@ function Dashboard({ displayName, profile, onSaveBalance, onRefreshProfile, onNa
   </>;
 }
 
-function Simulation({ obligations, paid, currentBalance }: { obligations: Obligation[]; paid: Set<number>; currentBalance: number }) {
-  const [name, setName] = useState("Ponsel baru");
-  const [price, setPrice] = useState("6000000");
-  const [downPayment, setDownPayment] = useState("1000000");
-  const [monthly, setMonthly] = useState("850000");
-  const [tenor, setTenor] = useState("6");
-  const [dueDate, setDueDate] = useState("2026-11-18");
-  const [fees, setFees] = useState("50000");
-  const [simulated, setSimulated] = useState(true);
-  const installment = Number(monthly) + Number(fees);
-  const day = new Date(`${dueDate}T12:00:00`).getDate() || 18;
-  const existing = obligations.filter((item) => !paid.has(item.id)).reduce((sum, item) => sum + item.amount, 0);
-  const endingA = currentBalance + INCOME - existing - fixedExpenses.reduce((sum, item) => sum + item.amount, 0);
-  const endingB = endingA - Number(downPayment) - installment;
-  const risk = endingB < 0 ? "Tinggi" : endingB < 800_000 ? "Sedang" : "Rendah";
-  const shortfall = Math.max(0, -endingB);
-  const formValid = name.trim() && Number(price) > 0 && installment > 0 && Number(tenor) > 0;
-  return <>
-    <PageHeading eyebrow="Fitur utama CICI" title="Simulasi Cicilan" description="Uji dampak cicilan baru terhadap arus kas sebelum kamu membuat komitmen." />
-    <div className="simulation-layout">
-      <Card className="sim-form"><div className="card-title"><div><h2>Rencana cicilan baru</h2><p>Lengkapi detail untuk mendapatkan proyeksi</p></div><span className="step-pill">1</span></div>
-        <div className="form-grid"><Field label="Nama cicilan atau barang" value={name} onChange={setName} error={!name.trim() ? "Nama wajib diisi" : undefined} /><Field label="Harga pembelian" value={price} onChange={setPrice} type="number" min={0} /><Field label="Uang muka" value={downPayment} onChange={setDownPayment} type="number" min={0} /><Field label="Cicilan per bulan" value={monthly} onChange={setMonthly} type="number" min={0} /><Field label="Tenor (bulan)" value={tenor} onChange={setTenor} type="number" min={1} /><Field label="Jatuh tempo pertama" value={dueDate} onChange={setDueDate} type="date" /><Field label="Biaya tambahan per bulan" value={fees} onChange={setFees} type="number" min={0} /></div>
-        <div className="form-note"><Icon name="alert" /><p>Perhitungan menggunakan pemasukan normal {formatRupiah(INCOME)}. Skenario konservatif memakai {formatRupiah(LOWER_INCOME)}.</p></div><Button icon="spark" disabled={!formValid} onClick={() => setSimulated(true)}>Hitung dampak cicilan</Button>
-      </Card>
-      <Card className="sim-insight"><Badge tone={risk === "Tinggi" ? "red" : risk === "Sedang" ? "yellow" : "green"}>Risiko {risk}</Badge><h2>{risk === "Tinggi" ? "Rencana ini belum aman untuk arus kasmu" : "Periksa ruang aman arus kasmu"}</h2><p>CICI membandingkan seluruh pemasukan, kebutuhan, dan kewajiban pada tanggal jatuh tempo.</p><div className="score-ring"><div><strong>{risk === "Tinggi" ? "38" : risk === "Sedang" ? "62" : "84"}</strong><span>/100</span></div></div><small>Skor kemampuan finansial</small></Card>
-    </div>
-    {simulated && <><div className="scenario-grid">
-      <Card><div className="scenario-head"><div><span>Skenario A</span><h2>Kondisi saat ini</h2></div><Badge tone="green">Tanpa cicilan baru</Badge></div><div className="scenario-values"><div><span>Saldo tersedia</span><strong>{formatRupiah(currentBalance)}</strong></div><div><span>Kewajiban bulanan</span><strong>{formatRupiah(existing)}</strong></div><div><span>Proyeksi akhir bulan</span><strong>{formatRupiah(endingA)}</strong></div></div></Card>
-      <Card className={risk === "Tinggi" ? "danger-border" : ""}><div className="scenario-head"><div><span>Skenario B</span><h2>Dengan {name}</h2></div><Badge tone={risk === "Tinggi" ? "red" : "yellow"}>Risiko {risk}</Badge></div><div className="scenario-values"><div><span>Kewajiban baru</span><strong>+{formatRupiah(installment)}</strong></div><div><span>Total komitmen</span><strong>{formatRupiah(existing + installment)}</strong></div><div><span>Proyeksi akhir bulan</span><strong className={endingB < 0 ? "negative" : ""}>{endingB < 0 ? "-" : ""}{formatRupiah(endingB)}</strong></div></div></Card>
-    </div>
-    <Card className="comparison-card"><div className="card-title"><div><h2>Perbandingan proyeksi saldo</h2><p>Dampak cicilan terhadap saldo sepanjang November</p></div><div className="chart-legend"><span><i className="dot blue-dot" />Saat ini</span><span><i className="dot red-dot" />Setelah cicilan</span></div></div><div className="comparison-bars"><div><span>Kondisi saat ini</span><i><b style={{ width: `${Math.max(4, Math.min(100, endingA / 20_000))}%` }} /></i><strong>{formatRupiah(endingA)}</strong></div><div><span>Setelah cicilan</span><i><b className="red-bar" style={{ width: `${Math.max(4, Math.min(100, Math.abs(endingB) / 20_000))}%` }} /></i><strong className={endingB < 0 ? "negative" : ""}>{endingB < 0 ? "-" : ""}{formatRupiah(endingB)}</strong></div></div></Card>
-    <div className={`result-banner ${risk === "Tinggi" ? "danger" : "warning"}`}><Icon name="alert" size={26} /><div><strong>{risk === "Tinggi" ? "Berisiko:" : "Perlu dipertimbangkan:"}</strong><p>{endingB < 0 ? `Jika cicilan ini diambil, saldo diproyeksikan tidak mencukupi setelah jatuh tempo ${day} November 2026, dengan estimasi kekurangan ${formatRupiah(shortfall)}.` : `Saldo akhir diperkirakan ${formatRupiah(endingB)}. Pastikan dana cadangan tetap cukup untuk kebutuhan penting.`}</p></div></div>
-    <Card><div className="card-title"><div><h2>Rekomendasi bertanggung jawab</h2><p>Pilihan untuk menjaga kewajiban penting tetap terpenuhi</p></div></div><div className="recommendations"><div><span>01</span><div><strong>Tunda pembelian</strong><p>Kumpulkan uang muka lebih besar sebelum berkomitmen.</p></div></div><div><span>02</span><div><strong>Turunkan cicilan</strong><p>Targetkan cicilan di bawah {formatRupiah(Math.max(200_000, Math.floor((endingA - 500_000) / 100_000) * 100_000))} per bulan.</p></div></div><div><span>03</span><div><strong>Jaga kebutuhan esensial</strong><p>Hindari cicilan bila sewa, pendidikan, dan makan tidak dapat tertutup.</p></div></div></div></Card></>}
-  </>;
-}
 
 function CalendarPage({ obligations, paid, currentBalance, onPay, onPaid }: { obligations: Obligation[]; paid: Set<number>; currentBalance: number; onPay: (item: Obligation) => void; onPaid: (id: number) => void }) {
   const [selectedDay, setSelectedDay] = useState(10);
@@ -366,16 +342,6 @@ function BudgetPage({ obligations, paid, currentBalance }: { obligations: Obliga
   </>;
 }
 
-function ReportsPage({ obligations, paid, currentBalance }: { obligations: Obligation[]; paid: Set<number>; currentBalance: number }) {
-  const total = obligations.reduce((sum, item) => sum + item.amount, 0);
-  const end = currentBalance + INCOME - obligations.filter((item) => !paid.has(item.id)).reduce((sum, item) => sum + item.amount, 0) - 1_100_000;
-  return <>
-    <PageHeading eyebrow="Insight finansial" title="Laporan Keuangan" description="Pahami pola arus kas dan periode risiko dalam satu tampilan." action={<SelectField label="Periode" value="November 2026" options={["November 2026", "Oktober 2026", "September 2026"]} onChange={() => {}} />} />
-    <div className="report-metrics"><MetricCard label="Pemasukan" value={formatRupiah(INCOME)} icon="chart" tone="green" helper="Estimasi normal" /><MetricCard label="Pengeluaran + kewajiban" value={formatRupiah(total + 1_100_000)} icon="receipt" tone="yellow" helper="Bulan berjalan" /><MetricCard label="Proyeksi saldo akhir" value={formatRupiah(end)} icon="wallet" helper="Setelah transaksi terjadwal" /><MetricCard label="Pembayaran selesai" value={`${paid.size}/${obligations.length}`} icon="check" tone="purple" helper="Konfirmasi manual" /></div>
-    <div className="report-grid"><Card><div className="card-title"><div><h2>Pemasukan vs pengeluaran</h2><p>Enam bulan terakhir</p></div></div><div className="bar-chart">{["Jun", "Jul", "Agu", "Sep", "Okt", "Nov"].map((month, index) => <div key={month}><div className="bars"><i style={{ height: `${55 + index * 5}%` }} /><b style={{ height: `${42 + index * 7}%` }} /></div><span>{month}</span></div>)}</div><div className="chart-legend centered"><span><i className="dot blue-dot" />Pemasukan</span><span><i className="dot yellow-dot" />Pengeluaran</span></div></Card><Card><div className="card-title"><div><h2>Komposisi kewajiban</h2><p>Berdasarkan kategori</p></div></div><div className="donut-wrap"><div className="donut"><div><strong>{formatRupiah(total)}</strong><span>Total</span></div></div><div className="donut-legend"><div><i className="blue-dot" /><span>Tempat tinggal</span><strong>33%</strong></div><div><i className="yellow-dot" /><span>Pendidikan</span><strong>24%</strong></div><div><i className="purple-dot" /><span>Cicilan</span><strong>33%</strong></div><div><i className="green-dot" /><span>Tagihan</span><strong>10%</strong></div></div></div></Card></div>
-    <Card className="insights-card"><div className="card-title"><div><h2>Insight CICI</h2><p>Hal penting dari data bulan ini</p></div></div><div className="insight-list"><div><span className="insight-icon warning"><Icon name="alert" /></span><div><strong>Waspadai minggu kedua</strong><p>Pengeluaran dan cicilan 8–18 November menyerap porsi terbesar dana tersedia.</p></div></div><div><span className="insight-icon good"><Icon name="check" /></span><div><strong>Arus kas kembali pulih setelah 25 November</strong><p>Pemasukan normal menaikkan saldo proyeksi, tetapi sisakan dana darurat.</p></div></div><div><span className="insight-icon info"><Icon name="spark" /></span><div><strong>Skenario konservatif</strong><p>Dengan pemasukan lebih rendah {formatRupiah(LOWER_INCOME)}, proyeksi akhir turun {formatRupiah(INCOME - LOWER_INCOME)}.</p></div></div></div></Card>
-  </>;
-}
 
 function ProfileCard({ profile, onSave }: { profile: Profile | null; onSave: (fullName: string, occupation: string) => Promise<string | null> }) {
   const name = profile?.full_name ?? "";
@@ -432,6 +398,28 @@ export default function App() {
   const [paymentItem, setPaymentItem] = useState<Obligation | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [scenarioState, setScenarioState] = useState<{ userId: string; plan: InstallmentPlan | null } | null>(null);
+  const [walletSession, setWalletSession] = useState<{ userId: string; state: DemoPaymentState } | null>(null);
+  const walletRef = useRef<{ userId: string; state: DemoPaymentState } | null>(null);
+  const [walletObligationId, setWalletObligationId] = useState("");
+  const financialToday = isoToday();
+  const financial = useFinancialData({ userId: session?.user.id, startDate: monthDate(`${financialToday.slice(0, 7)}-01`, -6), endDate: monthEnd(monthDate(financialToday, 120)) });
+  const scenario = scenarioState?.userId === session?.user.id ? scenarioState?.plan ?? null : null;
+  const changeScenario = (plan: InstallmentPlan | null) => setScenarioState(session ? { userId: session.user.id, plan } : null);
+  const demoWallet = walletSession && walletSession.userId === session?.user.id ? walletSession.state : createDemoPaymentState();
+  const simulateWalletPayment = (walletId: WalletId, obligation: FinancialObligation) => {
+    if (!session) return { status: 'invalid' as const };
+    const userId = session.user.id;
+    const current = walletRef.current?.userId === userId ? walletRef.current.state : createDemoPaymentState();
+    const result = simulatePayment(current, { walletId, obligation, at: new Date().toISOString() });
+    if (result.status === 'ok') { walletRef.current = { userId, state: result.state }; setWalletSession(walletRef.current); }
+    return result;
+  };
+  const invalidateWalletPayment = (id: string | number) => {
+    if (!session || walletRef.current?.userId !== session.user.id) return;
+    const next = invalidatePayment(walletRef.current.state, id);
+    if (next !== walletRef.current.state) { walletRef.current = { userId: session.user.id, state: next }; setWalletSession(walletRef.current); }
+  };
   const { profile, loading: profileLoading, error: profileError, reload: reloadProfile, save: saveProfile, saveBalance, refresh: refreshProfile } = useProfile(session?.user.id);
   const displayName = profile?.full_name?.trim() ?? "";
   const paidTotal = [...paid].reduce((sum, id) => sum + (obligations.find((item) => item.id === id)?.amount || 0), 0);
@@ -446,6 +434,7 @@ export default function App() {
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      if (_event === "SIGNED_OUT") { setScenarioState(null); setWalletSession(null); walletRef.current = null; setWalletObligationId(""); }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -454,8 +443,15 @@ export default function App() {
   const previousPage = useRef(page);
   useEffect(() => {
     if (page === "dashboard" && previousPage.current !== "dashboard") refreshProfile();
+    if ((page === "simulation" || page === "reports" || page === "wallet") && previousPage.current !== page) void financial.reload();
     previousPage.current = page;
-  }, [page, refreshProfile]);
+  }, [page, refreshProfile, financial.reload]);
+
+  useEffect(() => {
+    if (!session || !financial.snapshot || walletRef.current?.userId !== session.user.id) return;
+    const next = reconcilePayments(walletRef.current.state, financial.snapshot.obligations);
+    if (next !== walletRef.current.state) { walletRef.current = { userId: session.user.id, state: next }; setWalletSession(walletRef.current); }
+  }, [session, financial.snapshot, walletSession]);
 
   if (authLoading) return <div className="auth-loading">Memuat...</div>;
   if (!session) return <Auth />;
@@ -469,11 +465,11 @@ export default function App() {
     <div className="main-shell"><header><Button variant="ghost" icon="menu" onClick={() => setSidebarOpen(true)}>Menu</Button><div className="mobile-logo"><Logo /></div><div className="header-tagline">Kelola Cicilan. Jaga Cash Flow. Tetap Aman.</div><div className="header-actions"><button className="icon-button" aria-label="Notifikasi"><Icon name="bell" /><i /></button><div className="profile"><div className="avatar">{initialsOf(displayName)}</div><div><strong>{displayName}</strong>{profile?.occupation && <span>{profile.occupation}</span>}</div><Icon name="chevron" size={16} /></div><Button variant="ghost" onClick={() => supabase.auth.signOut()}>Keluar</Button></div></header>
       <main>
         {page === "dashboard" && <Dashboard displayName={displayName} profile={profile} onSaveBalance={saveBalance} onRefreshProfile={refreshProfile} onNavigate={navigate} />}
-        {page === "simulation" && <Simulation obligations={obligations} paid={paid} currentBalance={currentBalance} />}
+        {page === "wallet" && <Wallet key={session.user.id} state={demoWallet} obligations={financial.snapshot?.obligations ?? []} loading={financial.loading} error={financial.error} reload={financial.reload} initialObligationId={walletObligationId} onPay={simulateWalletPayment} />}
+        {(page === "simulation" || page === "reports") && <>{financial.loading ? <div className="finance-page" role="status">Memuat data keuangan akun...</div> : financial.error ? <div className="finance-page"><div className="finance-note finance-error" role="alert">Data belum bisa dimuat: {financial.error}</div><button type="button" className="button primary" onClick={() => void financial.reload()}>Coba lagi</button></div> : financial.snapshot ? page === "simulation" ? <SimulationLive key={session.user.id} snapshot={financial.snapshot} scenario={scenario} onScenarioChange={changeScenario} onReports={() => navigate("reports")} /> : <ReportsLive key={session.user.id} snapshot={financial.snapshot} scenario={scenario} /> : <div className="finance-page">Data akun belum tersedia.</div>}</>}
         {page === "calendar" && <CalendarPage obligations={obligations} paid={paid} currentBalance={currentBalance} onPay={setPaymentItem} onPaid={markPaid} />}
-        {page === "obligations" && <ObligationsLive />}
+        {page === "obligations" && <ObligationsLive simulatedPayments={demoWallet.payments} onPayDemo={(id) => { setWalletObligationId(String(id)); navigate("wallet"); }} onInvalidateDemo={invalidateWalletPayment} />}
         {page === "budget" && <BudgetPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
-        {page === "reports" && <ReportsPage obligations={obligations} paid={paid} currentBalance={currentBalance} />}
         {page === "settings" && <SettingsPage onOnboarding={() => setShowOnboarding(true)} profile={profile} onSaveProfile={saveProfile} />}
       </main><footer><span>© 2026 CICI · Versi beta</span><button onClick={() => setShowOnboarding(true)}>Buka onboarding</button><span>Privasi · Ketentuan · Bantuan</span></footer>
     </div>

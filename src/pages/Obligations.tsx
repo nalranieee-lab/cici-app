@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { adjustBalance } from "../lib/useProfile";
 import { payObligation, rupiah } from "../lib/obligationPayments";
+import type { DemoPayment } from "../lib/walletPayments";
 
 type Obligation = {
   id: string | number;
@@ -43,7 +44,7 @@ function validate(form: FormState): FormErrors {
   return errors;
 }
 
-export default function Obligations() {
+export default function Obligations({ simulatedPayments, onPayDemo, onInvalidateDemo }: { simulatedPayments: readonly DemoPayment[]; onPayDemo: (id: string | number) => void; onInvalidateDemo: (id: string | number) => void }) {
   const [items, setItems] = useState<Obligation[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -124,6 +125,8 @@ export default function Obligations() {
       const { error } = await supabase.from("obligations").update(payload).eq("id", editingId);
       if (error) setActionError(`Gagal menyimpan perubahan: ${error.message}`);
       else {
+        const previous = items.find(item => item.id === editingId);
+        if (previous && (previous.name !== payload.name || Number(previous.amount) !== payload.amount || previous.due_date !== payload.due_date)) onInvalidateDemo(editingId);
         closeForm();
         await load();
       }
@@ -149,7 +152,7 @@ export default function Obligations() {
     setActionError("");
     const { error } = await supabase.from("obligations").delete().eq("id", item.id);
     if (error) setActionError(`Gagal menghapus: ${error.message}`);
-    else setItems((prev) => prev.filter((row) => row.id !== item.id));
+    else { onInvalidateDemo(item.id); setItems((prev) => prev.filter((row) => row.id !== item.id)); }
     setBusyId(null);
   };
 
@@ -161,6 +164,7 @@ export default function Obligations() {
     if (result.status === "failed") {
       setActionError(result.message);
     } else {
+      onInvalidateDemo(item.id);
       setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, is_paid: true, paid_at: result.paidAt } : row)));
       if (result.status === "paid") setNotice(result.notice);
       else setActionError(result.message);
@@ -295,6 +299,12 @@ export default function Obligations() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`badge ${item.is_paid ? "green" : "yellow"}`}>{item.is_paid ? "Dibayar" : "Belum dibayar"}</span>
+                  {!item.is_paid && simulatedPayments.some(p => p.obligationId === String(item.id)) && <span className="badge blue">Dibayar dalam simulasi</span>}
+                  {!item.is_paid && (
+                    <button type="button" className="button secondary" disabled={busyId === item.id || simulatedPayments.some(p => p.obligationId === String(item.id))} onClick={() => onPayDemo(item.id)}>
+                      Simulasikan dengan E-wallet
+                    </button>
+                  )}
                   {!item.is_paid && (
                     <button type="button" className="button secondary" disabled={busyId === item.id} onClick={() => markPaid(item)}>
                       Tandai dibayar

@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "test": "node --experimental-strip-types --test src/lib/projection.test.ts src/lib/reportSummary.test.ts src/lib/walletPayments.test.ts",
+    "typecheck": "tsc --noEmit",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
