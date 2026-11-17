@@ -1,37 +1,16 @@
 // filepath: src/lib/useFinancialData.ts
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase } from './supabase';
+import { useMemo } from 'react';
+import { localFinance, useLocalFinance } from './localFinance';
 import type { FinancialSnapshot } from './financialTypes';
-
-export function useFinancialData({ userId, startDate, endDate }: { userId: string | undefined; startDate: string; endDate: string }) {
-  const request = useRef(0);
-  const key = `${userId}:${startDate}:${endDate}`;
-  const [state, setState] = useState<{ key: string; snapshot: FinancialSnapshot | null; loading: boolean; error: string | null }>({ key: '', snapshot: null, loading: !!userId, error: null });
-  const reload = useCallback(async () => {
-    const id = ++request.current;
-    if (!userId) { setState({ key, snapshot: null, loading: false, error: null }); return; }
-    setState({ key, snapshot: null, loading: true, error: null });
-    try {
-      const [profile, incomes, obligations] = await Promise.all([
-        supabase.from('profiles').select('balance, balance_updated_at').eq('id', userId).maybeSingle(),
-        supabase.from('incomes').select('id, name, amount, expected_date').eq('user_id', userId).gte('expected_date', startDate).lte('expected_date', endDate),
-        supabase.from('obligations').select('id, name, amount, due_date, is_paid, paid_at').eq('user_id', userId),
-      ]);
-      const failure = profile.error ?? incomes.error ?? obligations.error;
-      if (failure) throw new Error(failure.message);
-      if (!profile.data) throw new Error('Profil akun belum tersedia. Lengkapi profil terlebih dahulu.');
-      const snapshot: FinancialSnapshot = {
-        userId,
-        balance: profile.data.balance_updated_at ? Number(profile.data.balance) : null,
-        balanceUpdatedAt: profile.data.balance_updated_at,
-        incomes: (incomes.data ?? []).map(r => ({ id: r.id, name: r.name, amount: Number(r.amount), date: String(r.expected_date).slice(0, 10) })),
-        obligations: (obligations.data ?? []).map(r => ({ id: r.id, name: r.name, amount: Number(r.amount), dueDate: String(r.due_date).slice(0, 10), isPaid: Boolean(r.is_paid), paidAt: r.paid_at ?? null })),
-      };
-      if (id === request.current) setState({ key, snapshot, loading: false, error: null });
-    } catch (e) {
-      if (id === request.current) setState({ key, snapshot: null, loading: false, error: e instanceof Error ? e.message : 'Data belum dapat dimuat. Coba lagi.' });
-    }
-  }, [userId, startDate, endDate, key]);
-  useEffect(() => { void reload(); return () => { request.current++; }; }, [reload]);
-  return { snapshot: state.key === key ? state.snapshot : null, loading: !!userId && (state.key !== key || state.loading), error: state.key === key ? state.error : null, reload };
+const reload = async (_background = false) => { localFinance.refresh(); };
+export function useFinancialData({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const { data, error } = useLocalFinance();
+  const snapshot = useMemo<FinancialSnapshot>(() => ({
+    userId: 'local-browser', balance: data.profile.balance_updated_at ? data.profile.balance : null,
+    balanceUpdatedAt: data.profile.balance_updated_at,
+    incomes: data.incomes.filter(i => i.expected_date >= startDate && i.expected_date <= endDate).map(i => ({ id: i.id, name: i.name, amount: i.amount, date: i.expected_date })),
+    obligations: data.obligations.map(o => ({ id: o.id, name: o.name, amount: o.amount, dueDate: o.due_date, isPaid: o.is_paid, paidAt: o.paid_at })),
+    expenses: (data.expenses ?? []).map(item => ({ id: item.id, name: item.name, amount: item.amount, date: item.occurred_on, walletId: item.wallet_id })),
+  }), [data, startDate, endDate]);
+  return { snapshot, loading: false, error, reload };
 }

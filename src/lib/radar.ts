@@ -13,11 +13,15 @@ export const SOON_DAYS = 3;
 /** Jumlah kewajiban di garis waktu radar. */
 export const RADAR_TIMELINE_SIZE = 5;
 
-export type DueBadge = { label: "Terlambat" | "Segera" | "Mendatang"; tone: "red" | "yellow" | "gray" };
+export type DueBadge = {
+  label: "Terlambat" | "Segera" | "Mendatang";
+  tone: "red" | "yellow" | "gray";
+};
 
 export function dueBadge(dueDate: string, today: string): DueBadge {
   if (dueDate < today) return { label: "Terlambat", tone: "red" };
-  if (dueDate <= addDays(today, SOON_DAYS)) return { label: "Segera", tone: "yellow" };
+  if (dueDate <= addDays(today, SOON_DAYS))
+    return { label: "Segera", tone: "yellow" };
   return { label: "Mendatang", tone: "gray" };
 }
 
@@ -37,15 +41,26 @@ export type RadarResult = {
  * Yang sudah lewat jatuh tempo ikut dihitung karena masih harus dibayar dalam jendela ini.
  * balance = null berarti saldo belum pernah diisi; aturan persen saldo dilewati.
  */
-export function computeRadar(input: { today: string; obligations: UpcomingObligation[]; balance: number | null }): RadarResult {
+export function computeRadar(input: {
+  today: string;
+  obligations: UpcomingObligation[];
+  balance: number | null;
+}): RadarResult {
   const limit = addDays(input.today, RADAR_WINDOW_DAYS);
-  const inWindow = input.obligations.filter((o) => o.dueDate <= limit).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const inWindow = input.obligations
+    .filter((o) => o.dueDate <= limit)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const total = inWindow.reduce((sum, o) => sum + o.amount, 0);
   const overdueCount = inWindow.filter((o) => o.dueDate < input.today).length;
   const reasons: string[] = [];
-  if (overdueCount > 0) reasons.push(`${overdueCount} kewajiban sudah lewat jatuh tempo`);
-  if (inWindow.length >= RADAR_COUNT_THRESHOLD) reasons.push(`${inWindow.length} kewajiban menumpuk`);
-  if (input.balance !== null && total > RADAR_BALANCE_RATIO * input.balance) reasons.push(`total melebihi ${Math.round(RADAR_BALANCE_RATIO * 100)}% saldo`);
+  if (overdueCount > 0)
+    reasons.push(`${overdueCount} kewajiban sudah lewat jatuh tempo`);
+  if (inWindow.length >= RADAR_COUNT_THRESHOLD)
+    reasons.push(`${inWindow.length} kewajiban menumpuk`);
+  if (input.balance !== null && total > RADAR_BALANCE_RATIO * input.balance)
+    reasons.push(
+      `total melebihi ${Math.round(RADAR_BALANCE_RATIO * 100)}% saldo`,
+    );
   return {
     count: inWindow.length,
     total,

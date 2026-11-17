@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test src/lib/projection.test.ts src/lib/reportSummary.test.ts src/lib/walletPayments.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/projection.test.ts src/lib/reportSummary.test.ts src/lib/walletPayments.test.ts src/lib/financialViews.test.ts src/lib/financeRepository.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "vite",
     "build": "vite build",
