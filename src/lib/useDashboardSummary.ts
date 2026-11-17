@@ -1,78 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
-import { supabase } from "./supabase";
-
-export type DashboardSummary = {
-  /** Jumlah incomes dengan expected_date di bulan berjalan. */
-  incomeTotal: number;
-  incomeCount: number;
-  /** Jumlah obligations is_paid=false dengan due_date di bulan berjalan. */
-  unpaidTotal: number;
-  unpaidCount: number;
-  /** Jumlah obligations is_paid=true dengan due_date di bulan berjalan. */
-  paidTotal: number;
-  paidCount: number;
-};
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const toDateString = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-/** Batas bulan berjalan (zona waktu perangkat): [awal, awal bulan berikutnya). */
-function currentMonthRange() {
-  const now = new Date();
-  return {
-    start: toDateString(new Date(now.getFullYear(), now.getMonth(), 1)),
-    end: toDateString(new Date(now.getFullYear(), now.getMonth() + 1, 1)),
-  };
-}
-
-type ObligationRow = { amount: number; is_paid: boolean };
-type IncomeRow = { amount: number };
-
-const sum = (rows: { amount: number }[]) => rows.reduce((total, row) => total + Number(row.amount || 0), 0);
-
+// filepath: src/lib/useDashboardSummary.ts
+import { localFinance, useLocalFinance } from './localFinance';
+import { toDateString } from './cashflow';
+export type DashboardSummary = { incomeTotal: number; incomeCount: number; unpaidTotal: number; unpaidCount: number; paidTotal: number; paidCount: number; walletExpenseTotal: number; walletExpenseCount: number };
+const reload = async () => { localFinance.refresh(); };
 export function useDashboardSummary() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      setError("Sesi login tidak ditemukan. Silakan masuk kembali.");
-      setLoading(false);
-      return;
-    }
-    const userId = userData.user.id;
-    const { start, end } = currentMonthRange();
-    const [obligationsRes, incomesRes] = await Promise.all([
-      supabase.from("obligations").select("amount, is_paid").eq("user_id", userId).gte("due_date", start).lt("due_date", end),
-      supabase.from("incomes").select("amount").eq("user_id", userId).gte("expected_date", start).lt("expected_date", end),
-    ]);
-    if (obligationsRes.error || incomesRes.error) {
-      setError(`Gagal memuat ringkasan: ${(obligationsRes.error ?? incomesRes.error)!.message}`);
-      setSummary(null);
-    } else {
-      const obligations = (obligationsRes.data ?? []) as ObligationRow[];
-      const incomes = (incomesRes.data ?? []) as IncomeRow[];
-      const unpaid = obligations.filter((row) => !row.is_paid);
-      const paid = obligations.filter((row) => row.is_paid);
-      setSummary({
-        incomeTotal: sum(incomes),
-        incomeCount: incomes.length,
-        unpaidTotal: sum(unpaid),
-        unpaidCount: unpaid.length,
-        paidTotal: sum(paid),
-        paidCount: paid.length,
-      });
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { summary, loading, error, reload: load };
+  const { data, error } = useLocalFinance();
+  const month = toDateString(new Date()).slice(0, 7);
+  const incomes = data.incomes.filter(i => i.expected_date.startsWith(month));
+  const unpaid = data.obligations.filter(o => !o.is_paid && o.due_date.startsWith(month));
+  const paid = data.obligations.filter(o => o.is_paid && o.paid_at && toDateString(new Date(o.paid_at)).startsWith(month));
+  const expenses = (data.expenses ?? []).filter(expense => expense.occurred_on.startsWith(month));
+  const sum = (items: { amount: number }[]) => items.reduce((total, item) => total + item.amount, 0);
+  return { summary: { incomeTotal: sum(incomes), incomeCount: incomes.length, unpaidTotal: sum(unpaid), unpaidCount: unpaid.length, paidTotal: sum(paid), paidCount: paid.length, walletExpenseTotal: sum(expenses), walletExpenseCount: expenses.length }, loading: false, error: error ?? '', reload };
 }

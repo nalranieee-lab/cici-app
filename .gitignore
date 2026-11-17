@@ -19,3 +19,7 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Local review artifacts and the user-applied project guard exception.
+/.impeccable/review/
+/.cc-safety-net/

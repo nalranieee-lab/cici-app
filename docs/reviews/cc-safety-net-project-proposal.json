@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "destructive_command_protection": {
+    "enabled": false
+  },
+  "secret_protection": {
+    "enabled": false
+  }
+}

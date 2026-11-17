@@ -1,0 +1,247 @@
+/* filepath: src/pages/Readability.css */
+.app-shell {
+  --muted: #526079;
+}
+.card li > .min-w-0 {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.safe-card p,
+.chart-legend,
+.sidebar-help p,
+.privacy-note p,
+.toggle-row {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.chart-legend {
+  flex-wrap: wrap;
+}
+.finance-row > strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cici-toasts {
+  position: fixed;
+  z-index: 100;
+  right: 20px;
+  bottom: 20px;
+  width: min(390px, calc(100vw - 32px));
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+.cici-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  color: #14213d;
+  background: #fff;
+  border: 1px solid #b7c5d9;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px #14213d24;
+  pointer-events: auto;
+  overflow-wrap: anywhere;
+}
+.cici-toast.error {
+  border-color: #982738;
+}
+.cici-toast strong {
+  font-size: 14px;
+}
+.cici-toast p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 4px 0 0;
+}
+.cici-toast > div {
+  min-width: 0;
+  flex: 1;
+}
+.cici-toast button {
+  border: 0;
+  background: transparent;
+  color: #526079;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 24px;
+}
+.metric-copy {
+  min-width: 0;
+  flex: 1;
+}
+.metrics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.metric-card {
+  align-items: flex-start;
+}
+.metric-copy > span {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.metric-copy > strong {
+  font-size: clamp(18px, 1.6vw, 23px);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.metric-copy small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.metric-card .button {
+  font-size: 13px;
+  min-height: 44px;
+}
+.card-title h2 {
+  font-size: 18px;
+  line-height: 1.4;
+}
+.card-title p,
+.payment-info span {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.payment-info {
+  min-width: 0;
+}
+.payment-info strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.payment-info span {
+  white-space: normal;
+}
+.date-block strong {
+  font-size: 16px;
+}
+.date-block span,
+.badge {
+  font-size: 12px;
+}
+.payment-row {
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+}
+.alert p,
+.risk-panel > p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.alert strong {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.collision-line {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.collision-item {
+  min-width: 0;
+}
+.collision-item span,
+.collision-item strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.field > span,
+.field > small {
+  font-size: 13px;
+}
+.field input,
+.field select,
+.button {
+  font-size: 14px;
+  min-height: 44px;
+}
+.page-heading p {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.empty-state p,
+.empty-state strong,
+.profile-settings span,
+.calculation {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.wallet-balance-form {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+.wallet-balance-form .finance-actions > * {
+  flex: 1;
+}
+.sidebar nav button {
+  font-size: 13px;
+}
+.chart-labels span,
+.day-panel-head span,
+.balance-panel small {
+  font-size: 12px;
+}
+.finance-calendar-layout .calendar-day > span {
+  font-size: 12px;
+}
+.finance-calendar-layout .calendar-day i {
+  font-size: 11px;
+}
+.auth-form .field > span,
+.auth-form .field input,
+.auth-form .button {
+  font-size: 14px;
+}
+.auth-heading p,
+.auth-error,
+.auth-switch {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.metric-card .risk-gauge {
+  flex-shrink: 0;
+}
+@media (max-width: 1100px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lower-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 680px) {
+  .cici-toasts {
+    bottom: 80px;
+    right: 16px;
+  }
+  .payment-row {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .payment-row > .badge {
+    display: inline-flex;
+    grid-column: 2;
+    justify-self: start;
+  }
+  .payment-row .row-actions {
+    grid-column: 2;
+  }
+  .metric-card {
+    padding: 16px;
+  }
+  .metric-copy > strong {
+    font-size: 19px;
+  }
+}
+@media (max-width: 680px) {
+  .chart-labels span:nth-child(even) {
+    display: none;
+  }
+}
+@media (max-width: 420px) {
+  .metrics-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
