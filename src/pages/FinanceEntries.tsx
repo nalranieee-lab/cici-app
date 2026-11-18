@@ -7,7 +7,7 @@ import { localFinance, localError, useLocalFinance } from "../lib/localFinance";
 import type { LocalExpense, LocalIncome, LocalObligation } from "../lib/financeRepository";
 import type { DemoPayment } from "../lib/walletPayments";
 import { demoWallets, walletLabel, type WalletId } from "../lib/walletDemo";
-import { money } from "../lib/projection";
+import { isoToday, money } from "../lib/projection";
 import "./Finance.css";
 type Props = {
   kind: "income" | "obligation" | "expense";
@@ -36,7 +36,9 @@ export default function FinanceEntries({
   const rows: (LocalIncome | LocalObligation | LocalExpense)[] = income ? data.incomes : expense ? data.expenses ?? [] : data.obligations;
   const dateOf = (row: LocalIncome | LocalObligation | LocalExpense) =>
     "expected_date" in row ? row.expected_date : "due_date" in row ? row.due_date : row.occurred_on;
-  const items = [...rows].sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+  const items = [...rows].sort((a, b) => income || expense
+    ? dateOf(b).localeCompare(dateOf(a))
+    : dateOf(a).localeCompare(dateOf(b)));
   const run = (action: () => void, success: string) => {
     setError("");
     try {
@@ -123,7 +125,7 @@ export default function FinanceEntries({
     <>
       <div
         className="page-heading"
-        style={income ? { marginTop: 24 } : undefined}
+        style={income || expense ? { marginTop: 32 } : undefined}
       >
         <div>
           <h1>{income ? "Pemasukan Saya" : expense ? "Pengeluaran Saya" : "Kewajiban Saya"}</h1>
@@ -239,9 +241,12 @@ export default function FinanceEntries({
                   className="flex flex-wrap items-center justify-between gap-3 py-3"
                 >
                   <div className="min-w-0">
-                    <strong className="block text-sm break-words">
-                      {row.name}
-                    </strong>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {income && dateOf(row) > isoToday() && (
+                        <span className="badge blue" style={{ fontSize: 12 }}>Mendatang</span>
+                      )}
+                      <strong className="text-sm break-words">{row.name}</strong>
+                    </div>
                     <span className="block text-sm text-slate-600">
                       {money(row.amount)} · {displayDate(dateOf(row))}
                       {walletExpense && ` · ${walletLabel(walletExpense.wallet_id)}`}

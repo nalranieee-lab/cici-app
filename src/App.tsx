@@ -1562,6 +1562,7 @@ export default function App() {
     walletId: WalletId,
     amount: number,
     mode: "add" | "set",
+    source?: "income" | "transfer",
   ): string | null => {
     if (
       !Number.isSafeInteger(amount) ||
@@ -1571,7 +1572,7 @@ export default function App() {
     )
       return "Masukkan nominal rupiah yang valid."
 
-    try { localFinance.updateWalletBalance(walletId, amount, mode); } catch (error) { return localError(error); }
+    try { localFinance.updateWalletBalance(walletId, amount, mode, source); } catch (error) { return localError(error); }
 
     return null
   }
