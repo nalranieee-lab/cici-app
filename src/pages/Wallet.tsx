@@ -25,6 +25,7 @@ type Props = {
     walletId: WalletId,
     amount: number,
     mode: "add" | "set",
+    source?: "income" | "transfer",
   ) => string | null
 }
 export default function Wallet({
@@ -41,6 +42,7 @@ export default function Wallet({
   const [editingWallet, setEditingWallet] = useState<WalletId | null>(null)
   const [balanceAmount, setBalanceAmount] = useState("")
   const [balanceMode, setBalanceMode] = useState<"add" | "set">("add")
+  const [balanceSource, setBalanceSource] = useState<"" | "income" | "transfer">("")
   const [filter, setFilter] = useState<"all" | WalletId>("all")
   const transactions = history.filter(item => filter === 'all' || item.walletId === filter);
   const [walletId, setWalletId] = useState<WalletId>("dana")
@@ -129,10 +131,15 @@ export default function Wallet({
                       toast("Isi nominal saldo.", "error")
                       return
                     }
+                    if (balanceMode === "add" && !balanceSource) {
+                      toast("Pilih sumber penambahan saldo.", "error")
+                      return
+                    }
                     const error = onBalanceChange(
                       wallet.id,
                       Number(balanceAmount),
                       balanceMode,
+                      balanceSource || undefined,
                     )
                     if (error) {
                       toast(error, "error")
@@ -145,6 +152,7 @@ export default function Wallet({
                     )
                     setEditingWallet(null)
                     setBalanceAmount("")
+                    setBalanceSource("")
                   }}
                 >
                   <label className="finance-field">
@@ -160,6 +168,16 @@ export default function Wallet({
                       <option value="set">Ubah saldo akhir</option>
                     </select>
                   </label>
+                  {balanceMode === "add" && (
+                    <label className="finance-field">
+                      Sumber penambahan saldo
+                      <select value={balanceSource} onChange={(event) => setBalanceSource(event.target.value as "" | "income" | "transfer")} required>
+                        <option value="">Pilih sumber</option>
+                        <option value="income">Pemasukan baru</option>
+                        <option value="transfer">Pemindahan dari saldo utama</option>
+                      </select>
+                    </label>
+                  )}
                   <label className="finance-field">
                     Nominal (Rp)
                     <MoneyInput

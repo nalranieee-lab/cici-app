@@ -177,7 +177,8 @@ test('CRUD pengeluaran mengubah saldo sumber dan riwayat dompet secara bersama',
 });
 test('dompet tersimpan setelah reload dan simulasi tidak melunasi kewajiban', () => {
   const storage = makeStorage(), repo = new FinanceRepository(storage), bill=addBill(repo);
-  repo.updateWalletBalance('dana',500000,'add');
+  repo.saveBalance(500000);
+  repo.updateWalletBalance('dana',500000,'add','transfer');
   assert.equal(repo.simulateWalletPayment('dana',{...bill,dueDate:bill.due_date,isPaid:false}).status,'ok');
   const loaded = new FinanceRepository(storage);
   assert.equal(loaded.getSnapshot().data.wallet.balances.dana,200000);
@@ -185,6 +186,23 @@ test('dompet tersimpan setelah reload dan simulasi tidak melunasi kewajiban', ()
   assert.equal(loaded.simulateWalletPayment('dana',{...bill,dueDate:bill.due_date,isPaid:false}).status,'already_simulated');
   loaded.removeObligation(bill.id);
   assert.equal(loaded.getSnapshot().data.wallet.balances.dana,500000);
+});
+test('penambahan dompet membedakan pemasukan baru dan pemindahan dana', () => {
+  const storage = makeStorage(), repo = new FinanceRepository(storage);
+  repo.saveBalance(8000000);
+  repo.updateWalletBalance('gopay', 400000, 'add', 'income');
+  repo.updateWalletBalance('gopay', 100000, 'add', 'transfer');
+  repo.updateWalletBalance('gopay', 700000, 'set');
+  const loaded = new FinanceRepository(storage).getSnapshot().data;
+  assert.equal(loaded.wallet.balances.gopay, 700000);
+  assert.equal(loaded.profile.balance, 7900000);
+  assert.equal(loaded.incomes.length, 1);
+  assert.equal(loaded.incomes[0].name, 'Pemasukan GoPay');
+  assert.equal(loaded.incomes[0].amount, 400000);
+  assert.throws(() => repo.updateWalletBalance('gopay', 10, 'add'), /Pilih sumber/);
+  assert.throws(() => repo.updateWalletBalance('gopay', 8000000, 'add', 'transfer'), /tidak cukup/);
+  assert.equal(repo.getSnapshot().data.profile.balance, 7900000);
+  assert.equal(repo.getSnapshot().data.wallet.balances.gopay, 700000);
 });
 test('instance kedua membaca data terkini sebelum menulis', () => {
   const storage=makeStorage(), first=new FinanceRepository(storage), second=new FinanceRepository(storage);

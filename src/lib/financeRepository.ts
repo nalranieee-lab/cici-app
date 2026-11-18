@@ -160,10 +160,28 @@ export class FinanceRepository {
       item.is_paid = false; item.paid_at = null; item.balance_deducted = false;
     });
   }
-  updateWalletBalance(walletId: WalletId, amount: number, mode: 'add' | 'set') {
+  updateWalletBalance(walletId: WalletId, amount: number, mode: 'add' | 'set', source?: 'income' | 'transfer') {
     this.update(data => {
       if (!money(amount) || (mode === 'add' && amount === 0)) throw new Error('Isi nominal rupiah yang valid.');
+      if (mode === 'add' && source !== 'income' && source !== 'transfer') throw new Error('Pilih sumber penambahan saldo.');
+      if (mode === 'add' && source === 'transfer') {
+        if (data.profile.balance_updated_at === null) throw new Error('Isi saldo utama di Dashboard terlebih dahulu.');
+        if (data.profile.balance < amount) throw new Error('Saldo utama tidak cukup untuk dipindahkan.');
+        data.profile.balance -= amount;
+        data.profile.balance_updated_at = new Date().toISOString();
+      }
       data.wallet.balances[walletId] = mode === 'add' ? data.wallet.balances[walletId] + amount : amount;
+      if (mode === 'add') {
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        (data.walletTransactions ??= []).push({ id: crypto.randomUUID(), walletId, date: today, description: source === 'transfer' ? 'Pemindahan dari saldo utama' : 'Pemasukan baru', direction: 'in', amount });
+      }
+      if (mode === 'add' && source === 'income') {
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const walletName = { dana: 'DANA', gopay: 'GoPay', ovo: 'OVO', shopeepay: 'ShopeePay' }[walletId];
+        data.incomes.push({ id: crypto.randomUUID(), name: `Pemasukan ${walletName}`, amount, expected_date: today });
+      }
     });
   }
   simulateWalletPayment(walletId: WalletId, obligation: DemoObligation): DemoPaymentResult {
